@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initWorkspace } from "../src/config.js";
 import { listGrantedPath, readGrantedFile } from "../src/workspace/fsAccess.js";
-import { createGrant, findUsableGrant, revokeGrant } from "../src/workspace/grants.js";
+import { createGrant, findUsableGrant, loadGrants, parseTtl, revokeGrant } from "../src/workspace/grants.js";
 
 let root = "";
 
@@ -17,6 +17,13 @@ afterEach(async () => {
 });
 
 describe("workspace grants", () => {
+  it("requires positive safe TTL amounts", () => {
+    expect(parseTtl("1m")).toBe(60_000);
+    expect(() => parseTtl("0m")).toThrow("positive safe integer");
+    expect(() => parseTtl("9007199254740992m")).toThrow("positive safe integer");
+    expect(() => parseTtl("9007199254740991d")).toThrow("too large");
+  });
+
   it("allows granted reads and lists", async () => {
     await mkdir(path.join(root, "shared"), { recursive: true });
     await writeFile(path.join(root, "shared", "note.txt"), "hello\n", "utf8");
@@ -95,5 +102,30 @@ describe("workspace grants", () => {
       requesterAgentId: "alice",
       grantId: grant.id
     })).toBeUndefined();
+  });
+
+  it("rejects invalid grant read and list limits before saving", async () => {
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "shared", "note.txt"), "hello\n", "utf8");
+    const config = await initWorkspace({ agentId: "bob", workspace: root });
+    const baseGrant = {
+      dataDir: config.dataDir,
+      workspace: root,
+      ownerAgentId: "bob",
+      targetAgentId: "alice",
+      grantPath: "shared",
+      name: "shared",
+      ttl: "2h"
+    };
+
+    await expect(createGrant({
+      ...baseGrant,
+      maxReadBytes: 0
+    })).rejects.toThrow("maxReadBytes must be a positive safe integer");
+    await expect(createGrant({
+      ...baseGrant,
+      maxListEntries: Number.NaN
+    })).rejects.toThrow("maxListEntries must be a positive safe integer");
+    await expect(loadGrants(config.dataDir)).resolves.toEqual([]);
   });
 });

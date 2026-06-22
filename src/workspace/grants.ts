@@ -34,9 +34,24 @@ export function parseTtl(ttl: string): number {
     throw new Error("TTL must look like 30m, 2h, or 1d");
   }
   const amount = Number(amountText);
+  if (!Number.isSafeInteger(amount) || amount < 1) {
+    throw new Error("TTL amount must be a positive safe integer");
+  }
   const unit = unitText.toLowerCase();
   const multiplier = unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000;
-  return amount * multiplier;
+  const durationMs = amount * multiplier;
+  if (!Number.isSafeInteger(durationMs)) {
+    throw new Error("TTL duration is too large");
+  }
+  return durationMs;
+}
+
+function positiveIntegerLimit(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved < 1) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
+  return resolved;
 }
 
 export async function loadGrants(dataDir: string): Promise<WorkspaceGrant[]> {
@@ -85,8 +100,8 @@ export async function createGrant(input: {
     workspaceRoot,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + parseTtl(input.ttl)).toISOString(),
-    maxReadBytes: input.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
-    maxListEntries: input.maxListEntries ?? DEFAULT_MAX_LIST_ENTRIES
+    maxReadBytes: positiveIntegerLimit(input.maxReadBytes, DEFAULT_MAX_READ_BYTES, "maxReadBytes"),
+    maxListEntries: positiveIntegerLimit(input.maxListEntries, DEFAULT_MAX_LIST_ENTRIES, "maxListEntries")
   };
   const grants = await loadGrants(input.dataDir);
   grants.push(grant);
