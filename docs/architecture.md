@@ -44,7 +44,7 @@ Daemon sidecars retry connection failures and relay disconnects by default so tu
 - `outbox.jsonl`: outbound delivery records, including failed sends.
 - `grants.json`: local read-only grants.
 - `audit.jsonl`: append-only local audit events.
-- `status.json`: last known sidecar connection state.
+- `status.json`: last known sidecar connection state, including the latest connect/disconnect timestamps when available.
 - `wake-events.jsonl`: append-only local wake event log for inbound inbox events.
 - `wake-state.json`: local drain state for wake events already claimed by a thread or automation.
 - `wake-command-state.json`: local bookkeeping for wake events that already started a wake command.

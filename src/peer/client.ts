@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { appendAudit } from "../audit/auditLog.js";
-import { type CodexComsConfig, setRuntimeStatus } from "../config.js";
+import { type CodexComsConfig, loadRuntimeStatus, setRuntimeStatus } from "../config.js";
 import {
   FileAcceptPayloadSchema,
   FileChunkPayloadSchema,
@@ -347,14 +347,18 @@ export class PeerSidecar {
       }).catch(() => undefined);
     }));
     ws.on("close", () => {
-      setRuntimeStatus(this.config.dataDir, {
-        connected: false,
-        agentId: this.config.agentId,
-        pid: process.pid,
-        relay: this.config.relay,
-        room: this.config.room,
-        disconnectedAt: new Date().toISOString()
-      }).finally(() => this.closeResolve?.());
+      (async () => {
+        const previous = await loadRuntimeStatus(this.config.dataDir);
+        await setRuntimeStatus(this.config.dataDir, {
+          connected: false,
+          agentId: this.config.agentId,
+          pid: process.pid,
+          relay: this.config.relay,
+          room: this.config.room,
+          connectedAt: previous.connectedAt,
+          disconnectedAt: new Date().toISOString()
+        });
+      })().finally(() => this.closeResolve?.());
     });
     await appendAudit(this.config.dataDir, {
       event: "sidecar_connected",

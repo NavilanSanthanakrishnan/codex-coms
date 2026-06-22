@@ -561,6 +561,8 @@ program.command("status")
       room: config.room,
       connected: runtime.connected,
       sidecarAgentId: runtime.agentId,
+      connectedAt: runtime.connectedAt,
+      disconnectedAt: runtime.disconnectedAt,
       sidecarPid,
       sidecarPidRunning,
       inboxCount: inbox.filter((entry) => !entry.read).length,
@@ -586,6 +588,12 @@ program.command("status")
       console.log(`relay: ${status.relay ?? "(not configured)"}`);
       console.log(`room: ${status.room ?? "(not configured)"}`);
       console.log(`connected: ${status.connected}`);
+      if (status.connectedAt) {
+        console.log(`connected at: ${status.connectedAt}`);
+      }
+      if (status.disconnectedAt) {
+        console.log(`disconnected at: ${status.disconnectedAt}`);
+      }
       console.log(`sidecar pid: ${status.sidecarPid ?? "(none)"}${status.sidecarPidRunning ? " running" : ""}`);
       if (status.sidecarAgentId) {
         console.log(`sidecar agent: ${status.sidecarAgentId}`);
