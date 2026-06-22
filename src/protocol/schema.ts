@@ -29,6 +29,17 @@ export const AgentMessageAckPayloadSchema = z.object({
   messageId: idSchema
 });
 
+export const RoomPeersRequestPayloadSchema = z.object({});
+
+export const RoomPeersResponsePayloadSchema = z.object({
+  requestId: idSchema,
+  peers: z.array(z.object({
+    agentId: agentIdSchema,
+    sockets: z.number().int().positive(),
+    kinds: z.array(z.string().max(80))
+  }))
+});
+
 export const WorkspaceGrantRequestPayloadSchema = z.object({
   path: pathSchema,
   reason: textSchema
@@ -127,6 +138,8 @@ const payloadSchemas = {
   "hello.ack": HelloAckPayloadSchema,
   "agent.message": AgentMessagePayloadSchema,
   "agent.message.ack": AgentMessageAckPayloadSchema,
+  "room.peers.request": RoomPeersRequestPayloadSchema,
+  "room.peers.response": RoomPeersResponsePayloadSchema,
   "workspace.grant.request": WorkspaceGrantRequestPayloadSchema,
   "workspace.grant.created": WorkspaceGrantCreatedPayloadSchema,
   "workspace.grant.revoked": WorkspaceGrantRevokedPayloadSchema,

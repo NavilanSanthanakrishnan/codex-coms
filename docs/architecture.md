@@ -29,6 +29,8 @@ Codex or human
 
 Direct CLI commands such as `send`, `request-read`, `list-remote`, `read-remote`, and `send-file` open short-lived authenticated WebSocket connections. Long-running `connect` starts the sidecar that receives inbound messages and serves grants.
 
+`connect` writes `.codex-coms/sidecar.pid` and refuses to start a duplicate sidecar unless `--replace` is passed. `status` compares config identity, runtime sidecar identity, and PID liveness so identity drift is visible.
+
 ## State Files
 
 `codex-coms init` creates `.codex-coms/` in the workspace:
@@ -75,3 +77,5 @@ Received files are saved under `.codex-coms/transfers/<fromAgent>/<transferId>/`
 Codex is not assumed to passively listen. The stable MVP behavior is polling with `codex-coms inbox`.
 
 `src/wake/codexWake.ts` contains an optional disabled-by-default wake helper. It can run a locally configured command with static local inputs only. Remote peers cannot choose the command or inject message text into shell execution.
+
+For immediate local awareness, use `codex-coms wake notify`. For autonomous handling, configure a trusted local command that runs Codex non-interactively and checks `codex-coms inbox`. Existing Codex thread interruption remains a local Codex-app/automation concern, not a peer-controlled protocol feature.

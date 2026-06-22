@@ -34,6 +34,14 @@ Examples that can work depending on your environment:
 - SSH tunnel from the friend computer to the host.
 - A TLS-terminating reverse proxy in front of the relay.
 
+For a quick cross-network test, Cloudflare Tunnel can expose the local relay:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+Share the printed `https://...trycloudflare.com` URL as `wss://...trycloudflare.com` for codex-coms clients.
+
 ## Token Handling
 
 Generate a fresh room token per collaboration session.

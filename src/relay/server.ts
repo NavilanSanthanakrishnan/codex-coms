@@ -14,6 +14,7 @@ interface RelayConnection {
   ws: WebSocket;
   agentId: string;
   room: string;
+  kind: string;
 }
 
 export class RelayServer {
@@ -86,7 +87,8 @@ export class RelayServer {
     const connection: RelayConnection = {
       ws,
       agentId: hello.from,
-      room: hello.room
+      room: hello.room,
+      kind: String(hello.payload.kind ?? "unknown")
     };
     let room = this.rooms.get(connection.room);
     if (!room) {
@@ -152,6 +154,19 @@ export class RelayServer {
       this.sendError(ws, "forbidden", "message room/from does not match connection", message.id, connection.room, connection.agentId);
       return;
     }
+    if (message.type === "room.peers.request") {
+      this.send(ws, makeProtocolMessage({
+        type: "room.peers.response",
+        room: connection.room,
+        from: "relay",
+        to: connection.agentId,
+        payload: {
+          requestId: message.id,
+          peers: this.listRoomPeers(connection.room)
+        }
+      }));
+      return;
+    }
     if (!message.to) {
       this.sendError(ws, "missing_target", "message must include a target", message.id, connection.room, connection.agentId);
       return;
@@ -170,6 +185,20 @@ export class RelayServer {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
     }
+  }
+
+  private listRoomPeers(roomName: string): Array<{ agentId: string; sockets: number; kinds: string[] }> {
+    const room = this.rooms.get(roomName);
+    if (!room) {
+      return [];
+    }
+    return [...room.entries()].map(([agentId, sockets]) => {
+      return {
+        agentId,
+        sockets: sockets.size,
+        kinds: [...new Set([...sockets].map((connection) => connection.kind))]
+      };
+    }).sort((left, right) => left.agentId.localeCompare(right.agentId));
   }
 
   private sendError(ws: WebSocket, code: string, message: string, requestId: string | undefined, room: string, to: string): void {

@@ -10,11 +10,13 @@ import {
   resolveWorkspace,
   saveConfig,
   updateConfig,
+  validateAgentId,
   type CodexComsConfig
 } from "./config.js";
 import { runDemo } from "./demo/runDemo.js";
-import { PeerSidecar, parseListResponse, parseReadResponse, requestProtocolResponse, sendAgentMessage, sendFileToPeer, sendProtocolMessage } from "./peer/client.js";
+import { PeerSidecar, parseListResponse, parseReadResponse, requestProtocolResponse, requestRoomPeers, sendAgentMessage, sendFileToPeer, sendProtocolMessage } from "./peer/client.js";
 import { formatInbox, markInboxRead, readInboxEntries } from "./peer/inbox.js";
+import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSidecarPid, writeSidecarPid } from "./peer/pid.js";
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
@@ -71,9 +73,11 @@ program.command("init")
   .option("--relay <url>", "relay WebSocket URL")
   .option("--room <room>", "room name", DEFAULT_ROOM)
   .option("--token <token>", "shared room token")
+  .option("--display-name <name>", "friendly display name; wire agent ids cannot contain spaces")
   .action(async (options) => {
     const config = await initWorkspace({
       agentId: options.agent,
+      displayName: options.displayName,
       workspace: options.workspace ?? program.opts().workspace,
       dataDir: options.dataDir ?? program.opts().dataDir,
       relay: options.relay,
@@ -91,9 +95,12 @@ program.command("connect")
   .requiredOption("--token <token>", "shared room token")
   .option("--workspace <path>", "workspace path")
   .option("--data-dir <path>", "state directory")
+  .option("--replace", "stop an existing sidecar for this workspace before connecting")
   .action(async (options) => {
+    validateAgentId(options.agent);
     const workspace = workspaceFromOptions(options);
     const dataDir = dataDirFromOptions(workspace, options);
+    await ensureNoDuplicateSidecar(dataDir, Boolean(options.replace));
     let config: CodexComsConfig;
     try {
       config = await loadConfig(workspace, dataDir);
@@ -122,13 +129,58 @@ program.command("connect")
         return;
       }
       stopping = true;
-      await sidecar.stop();
+      try {
+        await sidecar.stop();
+      } finally {
+        await clearSidecarPid(config.dataDir);
+      }
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     await sidecar.start();
+    await writeSidecarPid(config.dataDir);
     console.log(`connected ${config.agentId} to ${config.relay} room=${config.room}`);
     await sidecar.waitForClose();
+    await clearSidecarPid(config.dataDir);
+  });
+
+program.command("disconnect")
+  .description("stop the sidecar process recorded for this workspace")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const pid = await readSidecarPid(config.dataDir);
+    if (!pid) {
+      console.log("no sidecar pid file found");
+      return;
+    }
+    if (!isProcessRunning(pid)) {
+      await clearSidecarPid(config.dataDir, pid);
+      console.log(`removed stale sidecar pid ${pid}`);
+      return;
+    }
+    process.kill(pid, "SIGTERM");
+    console.log(`sent SIGTERM to sidecar pid ${pid}`);
+  });
+
+program.command("rename")
+  .description("rename the local wire agent id in config; stop the sidecar first")
+  .requiredOption("--agent <agentId>", "new wire agent id, such as shreyagent")
+  .option("--display-name <name>", "friendly display name, such as Shrey Agent")
+  .action(async (options) => {
+    validateAgentId(options.agent);
+    const config = await loadCliConfig(options);
+    const pid = await readSidecarPid(config.dataDir);
+    if (pid && isProcessRunning(pid)) {
+      throw new Error(`sidecar pid ${pid} is still running; run codex-coms disconnect first, then reconnect with --agent ${options.agent}`);
+    }
+    const next = await updateConfig(config, {
+      agentId: options.agent,
+      displayName: options.displayName ?? config.displayName
+    });
+    console.log(`renamed local agent id to ${next.agentId}`);
+    if (next.displayName) {
+      console.log(`display name: ${next.displayName}`);
+    }
   });
 
 program.command("send")
@@ -136,6 +188,7 @@ program.command("send")
   .requiredOption("--to <agentId>", "target agent id")
   .requiredOption("--text <message>", "message text")
   .action(async (options) => {
+    validateAgentId(options.to);
     const config = await loadCliConfig(options);
     const message = await sendAgentMessage(config, options.to, options.text);
     console.log(`sent ${message.id} to ${options.to}`);
@@ -346,38 +399,137 @@ program.command("send-file")
 program.command("status")
   .description("show local codex-coms state")
   .option("--json", "print JSON")
+  .option("--peers", "ask the relay for connected peers in this room")
   .action(async (options) => {
     const config = await loadCliConfig(options);
     const inbox = await readInboxEntries(config.dataDir);
     const grants = await loadGrants(config.dataDir);
     const runtime = await loadRuntimeStatus(config.dataDir);
     const activeGrants = grants.filter((grant) => isGrantActive(grant));
+    const sidecarPid = await readSidecarPid(config.dataDir);
+    const sidecarPidRunning = sidecarPid ? isProcessRunning(sidecarPid) : false;
+    const warnings: string[] = [];
+    if (runtime.agentId && runtime.agentId !== config.agentId) {
+      warnings.push(`identity drift: config agent is ${config.agentId}, last sidecar agent is ${runtime.agentId}`);
+    }
+    if (runtime.connected && !sidecarPidRunning) {
+      warnings.push("status file says connected, but no recorded sidecar pid is running");
+    }
+    let peers: Array<{ agentId: string; sockets: number; kinds: string[] }> | undefined;
+    if (options.peers) {
+      try {
+        peers = await requestRoomPeers(config);
+      } catch (error) {
+        warnings.push(`could not fetch peers: ${(error as Error).message}`);
+      }
+    }
     const status = {
       agentId: config.agentId,
+      displayName: config.displayName,
       workspace: config.workspace,
       relay: config.relay,
       room: config.room,
       connected: runtime.connected,
+      sidecarAgentId: runtime.agentId,
+      sidecarPid,
+      sidecarPidRunning,
       inboxCount: inbox.filter((entry) => !entry.read).length,
       activeGrants: activeGrants.length,
       transferFolder: path.join(config.dataDir, "transfers"),
       auditLogPath: path.join(config.dataDir, "audit.jsonl"),
-      tokenConfigured: Boolean(config.token)
+      tokenConfigured: Boolean(config.token),
+      wakeEnabled: Boolean(config.wake?.enabled),
+      peers,
+      warnings
     };
     if (options.json) {
       console.log(JSON.stringify(status, null, 2));
     } else {
       console.log(`agent: ${status.agentId}`);
+      if (status.displayName) {
+        console.log(`display name: ${status.displayName}`);
+      }
       console.log(`workspace: ${status.workspace}`);
       console.log(`relay: ${status.relay ?? "(not configured)"}`);
       console.log(`room: ${status.room ?? "(not configured)"}`);
       console.log(`connected: ${status.connected}`);
+      console.log(`sidecar pid: ${status.sidecarPid ?? "(none)"}${status.sidecarPidRunning ? " running" : ""}`);
+      if (status.sidecarAgentId) {
+        console.log(`sidecar agent: ${status.sidecarAgentId}`);
+      }
       console.log(`unread inbox: ${status.inboxCount}`);
       console.log(`active grants: ${status.activeGrants}`);
       console.log(`transfers: ${status.transferFolder}`);
       console.log(`audit: ${status.auditLogPath}`);
       console.log(`token configured: ${status.tokenConfigured}`);
+      console.log(`wake enabled: ${status.wakeEnabled}`);
+      if (status.peers) {
+        console.log("peers:");
+        for (const peer of status.peers) {
+          console.log(`- ${peer.agentId} sockets=${peer.sockets} kinds=${peer.kinds.join(",")}`);
+        }
+      }
+      for (const warning of status.warnings) {
+        console.log(`warning: ${warning}`);
+      }
     }
+  });
+
+const wake = program.command("wake")
+  .description("configure local opt-in wake behavior for inbound inbox events");
+
+wake.command("status")
+  .description("show wake configuration")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    console.log(JSON.stringify(config.wake ?? { enabled: false }, null, 2));
+  });
+
+wake.command("disable")
+  .description("disable wake behavior")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    await updateConfig(config, {
+      wake: { enabled: false }
+    });
+    console.log("wake disabled");
+  });
+
+wake.command("notify")
+  .description("wake with a local macOS notification when inbox events arrive")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    await updateConfig(config, {
+      wake: {
+        enabled: true,
+        command: [
+          "/usr/bin/osascript",
+          "-e",
+          "display notification \"Run codex-coms inbox to read it.\" with title \"codex-coms message\""
+        ]
+      }
+    });
+    console.log("wake enabled with local macOS notification");
+  });
+
+wake.command("command")
+  .description("wake with a locally chosen command; remote message text is never passed as shell input")
+  .argument("<command>", "absolute command path")
+  .argument("[args...]", "static command args")
+  .option("--prompt <text>", "static prompt argument appended after static args")
+  .action(async (command, args: string[], options) => {
+    const config = await loadCliConfig(options);
+    if (!path.isAbsolute(command)) {
+      throw new Error("wake command must be an absolute path");
+    }
+    await updateConfig(config, {
+      wake: {
+        enabled: true,
+        command: [command, ...args],
+        staticPrompt: options.prompt
+      }
+    });
+    console.log(`wake enabled with command ${command}`);
   });
 
 program.command("demo")

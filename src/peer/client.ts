@@ -6,6 +6,7 @@ import {
   FileChunkPayloadSchema,
   FileCompletePayloadSchema,
   FileOfferPayloadSchema,
+  RoomPeersResponsePayloadSchema,
   WorkspaceGrantCreatedPayloadSchema,
   WorkspaceGrantRequestPayloadSchema,
   WorkspaceGrantRevokedPayloadSchema,
@@ -19,9 +20,11 @@ import {
 } from "../protocol/schema.js";
 import type { ProtocolMessage, ProtocolType } from "../protocol/types.js";
 import { appendInboxEntry, appendOutboxEntry } from "./inbox.js";
+import type { InboxEntry } from "./inbox.js";
 import { FileTransferReceiver, prepareFileTransfer } from "../transfer/fileTransfer.js";
 import { findUsableGrant } from "../workspace/grants.js";
 import { FsAccessError, listGrantedPath, readGrantedFile } from "../workspace/fsAccess.js";
+import { maybeWakeCodex, writeInboxSummary } from "../wake/codexWake.js";
 
 export interface ProtocolConnectionOptions {
   relay: string;
@@ -122,7 +125,7 @@ export async function sendProtocolMessage(config: CodexComsConfig, message: Prot
       const response = await connection.waitFor((item) => {
         return item.type === "error" && (item.payload as Record<string, unknown>).requestId === message.id;
       }, waitMs);
-      throw new Error(String((response.payload as Record<string, unknown>).message));
+      throw new Error(`${String((response.payload as Record<string, unknown>).message)}. Target peers must have codex-coms connect running; one-shot sends are not inbox-queued.`);
     } catch (error) {
       if ((error as Error).message !== "timed out waiting for protocol response") {
         throw error;
@@ -147,7 +150,7 @@ export async function requestProtocolResponse(config: CodexComsConfig, message: 
       return (item.payload as Record<string, unknown>).requestId === message.id;
     }, timeoutMs);
     if (response.type === "error") {
-      throw new Error(String((response.payload as Record<string, unknown>).message));
+      throw new Error(`${String((response.payload as Record<string, unknown>).message)}. Target peers must have codex-coms connect running; one-shot sends are not inbox-queued.`);
     }
     return response;
   } finally {
@@ -163,21 +166,57 @@ export async function sendAgentMessage(config: CodexComsConfig, to: string, text
     to,
     payload: { text }
   });
-  await appendOutboxEntry(config.dataDir, {
-    id: message.id,
-    to,
-    type: message.type,
-    summary: text.slice(0, 200)
-  });
-  await appendAudit(config.dataDir, {
-    event: "message_sent",
-    actor: config.agentId,
-    peer: to,
-    messageId: message.id,
-    result: "ok"
-  });
-  await sendProtocolMessage(config, message);
+  const connection = await ProtocolConnection.open({ ...requireRelayConfig(config), kind: "cli" });
+  try {
+    connection.send(message);
+    const response = await connection.waitFor((item) => {
+      if (item.type === "error" && (item.payload as Record<string, unknown>).requestId === message.id) {
+        return true;
+      }
+      return item.type === "agent.message.ack" && (item.payload as Record<string, unknown>).messageId === message.id;
+    }, 5000);
+    if (response.type === "error") {
+      throw new Error(`${String((response.payload as Record<string, unknown>).message)}. Target peers must have codex-coms connect running; one-shot sends are not inbox-queued.`);
+    }
+    await appendOutboxEntry(config.dataDir, {
+      id: message.id,
+      to,
+      type: message.type,
+      summary: text.slice(0, 200),
+      delivered: true
+    });
+    await appendAudit(config.dataDir, {
+      event: "message_sent",
+      actor: config.agentId,
+      peer: to,
+      messageId: message.id,
+      result: "ok"
+    });
+  } catch (error) {
+    await appendAudit(config.dataDir, {
+      event: "send_failed",
+      actor: config.agentId,
+      peer: to,
+      messageId: message.id,
+      result: "error",
+      details: { reason: (error as Error).message }
+    });
+    throw error;
+  } finally {
+    connection.close();
+  }
   return message;
+}
+
+export async function requestRoomPeers(config: CodexComsConfig): Promise<Array<{ agentId: string; sockets: number; kinds: string[] }>> {
+  const message = makeProtocolMessage({
+    type: "room.peers.request",
+    room: config.room ?? "default",
+    from: config.agentId,
+    payload: {}
+  });
+  const response = await requestProtocolResponse(config, message, ["room.peers.response"]);
+  return RoomPeersResponsePayloadSchema.parse(response.payload).peers;
 }
 
 export async function sendFileToPeer(config: CodexComsConfig, to: string, filePath: string): Promise<string> {
@@ -200,8 +239,14 @@ export async function sendFileToPeer(config: CodexComsConfig, to: string, filePa
     });
     connection.send(offer);
     const accept = await connection.waitFor((message) => {
+      if (message.type === "error" && (message.payload as Record<string, unknown>).requestId === offer.id) {
+        return true;
+      }
       return message.type === "file.accept" && (message.payload as Record<string, unknown>).transferId === transfer.transferId;
     }, 5000);
+    if (accept.type === "error") {
+      throw new Error(`${String((accept.payload as Record<string, unknown>).message)}. Target peers must have codex-coms connect running; one-shot sends are not inbox-queued.`);
+    }
     const accepted = FileAcceptPayloadSchema.parse(accept.payload);
     if (!accepted.accepted) {
       throw new Error(accepted.reason ?? "peer rejected file");
@@ -256,6 +301,8 @@ export class PeerSidecar {
     this.connection = await ProtocolConnection.open({ ...requireRelayConfig(this.config), kind: "sidecar" });
     await setRuntimeStatus(this.config.dataDir, {
       connected: true,
+      agentId: this.config.agentId,
+      pid: process.pid,
       relay: this.config.relay,
       room: this.config.room,
       connectedAt: new Date().toISOString()
@@ -275,6 +322,8 @@ export class PeerSidecar {
     ws.on("close", () => {
       setRuntimeStatus(this.config.dataDir, {
         connected: false,
+        agentId: this.config.agentId,
+        pid: process.pid,
         relay: this.config.relay,
         room: this.config.room,
         disconnectedAt: new Date().toISOString()
@@ -347,9 +396,20 @@ export class PeerSidecar {
     this.connection?.send(message);
   }
 
+  private async appendInboxAndWake(entry: InboxEntry): Promise<void> {
+    await appendInboxEntry(this.config.dataDir, entry);
+    if (this.config.wake?.enabled) {
+      const inboxSummaryPath = await writeInboxSummary(this.config.dataDir, entry);
+      await maybeWakeCodex(this.config.dataDir, this.config.agentId, {
+        ...this.config.wake,
+        inboxSummaryPath
+      });
+    }
+  }
+
   private async handleAgentMessage(message: ProtocolMessage): Promise<void> {
     const payload = validatePayload("agent.message", message.payload);
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,
@@ -379,7 +439,7 @@ export class PeerSidecar {
 
   private async handleGrantRequest(message: ProtocolMessage): Promise<void> {
     const payload = WorkspaceGrantRequestPayloadSchema.parse(message.payload);
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,
@@ -401,7 +461,7 @@ export class PeerSidecar {
 
   private async handleGrantCreated(message: ProtocolMessage): Promise<void> {
     const payload = WorkspaceGrantCreatedPayloadSchema.parse(message.payload);
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,
@@ -415,7 +475,7 @@ export class PeerSidecar {
 
   private async handleGrantRevoked(message: ProtocolMessage): Promise<void> {
     const payload = WorkspaceGrantRevokedPayloadSchema.parse(message.payload);
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,
@@ -562,7 +622,7 @@ export class PeerSidecar {
   private async handleFileComplete(message: ProtocolMessage): Promise<void> {
     FileCompletePayloadSchema.parse(message.payload);
     const result = await this.receiver.complete(message);
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,
@@ -580,7 +640,7 @@ export class PeerSidecar {
   }
 
   private async handleError(message: ProtocolMessage): Promise<void> {
-    await appendInboxEntry(this.config.dataDir, {
+    await this.appendInboxAndWake({
       id: message.id,
       timestamp: message.timestamp,
       from: message.from,

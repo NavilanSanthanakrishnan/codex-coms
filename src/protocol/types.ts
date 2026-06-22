@@ -3,6 +3,8 @@ export const protocolTypes = [
   "hello.ack",
   "agent.message",
   "agent.message.ack",
+  "room.peers.request",
+  "room.peers.response",
   "workspace.grant.request",
   "workspace.grant.created",
   "workspace.grant.revoked",
@@ -48,4 +50,10 @@ export interface RemoteFileEntry {
 export interface WorkspaceReadPayload {
   grantId: string;
   path: string;
+}
+
+export interface RoomPeer {
+  agentId: string;
+  sockets: number;
+  kinds: string[];
 }

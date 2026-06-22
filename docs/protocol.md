@@ -25,6 +25,8 @@ Every message has this shape:
 - `hello.ack`: relay acceptance. Payload includes `accepted` and `agentCount`.
 - `agent.message`: human-readable peer message. Payload includes `text`.
 - `agent.message.ack`: peer receipt notice. Payload includes `messageId`.
+- `room.peers.request`: ask the relay for connected room members. Payload is empty.
+- `room.peers.response`: connected room members. Payload includes `requestId` and `peers`.
 - `workspace.grant.request`: request read access. Payload includes `path` and `reason`.
 - `workspace.grant.created`: notify a peer that a grant exists. Payload includes `grantId`, `name`, `path`, `expiresAt`, `maxReadBytes`, and `maxListEntries`.
 - `workspace.grant.revoked`: notify a peer that a grant was revoked. Payload includes `grantId`.
@@ -47,6 +49,7 @@ The relay validates each frame before routing.
 - Tokens are not logged.
 - Later frames must match the authenticated connection's `room` and `from`.
 - Frames without a connected target receive an `error`.
+- `room.peers.request` is answered by the relay and does not require a `to` field.
 - The relay does not interpret grant or file payloads beyond schema validation and routing.
 
 ## Request And Response Correlation
@@ -55,6 +58,8 @@ Remote read/list requests use the request message `id` as the response `payload.
 
 CLI commands wait for:
 
+- `room.peers.response` for `status --peers`.
+- `agent.message.ack` for `send`.
 - `workspace.list.response` for `list-remote`.
 - `workspace.read.response` for `read-remote`.
 - `file.accept` for `send-file`.

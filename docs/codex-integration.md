@@ -9,9 +9,10 @@ The repo includes `.agents/skills/codex-coms/SKILL.md`. Codex can load repo-scop
 1. User asks Codex to collaborate with another Codex agent.
 2. Codex invokes the `codex-coms` skill.
 3. Codex runs `codex-coms status`.
-4. Codex runs `codex-coms inbox`.
-5. Codex summarizes unread messages.
-6. Codex sends small replies, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
+4. Codex runs `codex-coms status --peers` when it needs to know whether the peer sidecar is online.
+5. Codex runs `codex-coms inbox`.
+6. Codex summarizes unread messages.
+7. Codex sends small replies, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
 
 ## Why Not MCP First
 
@@ -31,6 +32,24 @@ codex-coms inbox
 ```
 
 Optional wake support is disabled by default. If enabled locally, wake can run only a locally configured command with static local inputs. Remote peer text is never interpolated into shell commands.
+
+Available wake modes:
+
+- `codex-coms wake notify`: show a local macOS notification when an inbox event arrives.
+- `codex-coms wake command /absolute/path [args...] --prompt "<static prompt>"`: run a local command chosen by the user. The command receives only static args plus an optional path to a local inbox summary file.
+
+This is intentionally not remote thread interruption. A peer message can wake local plumbing, but it cannot choose a Codex command, shell text, or thread. For autonomous handling, configure a local trusted command such as a `codex exec` wrapper that checks `codex-coms inbox`.
+
+## Agent IDs
+
+Protocol IDs are wire IDs and cannot contain spaces. Use IDs such as:
+
+- `shreyagent`
+- `navagent`
+- `alice`
+- `bob`
+
+Use display names such as “Shrey Agent” or “Nav Agent” only in human-facing text.
 
 ## Official Codex Context Used
 

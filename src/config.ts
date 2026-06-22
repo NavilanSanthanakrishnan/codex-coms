@@ -3,20 +3,32 @@ import path from "node:path";
 
 export const DEFAULT_DATA_DIR = ".codex-coms";
 export const DEFAULT_ROOM = "default";
+export const AGENT_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+export interface WakeSettings {
+  enabled: boolean;
+  command?: string[];
+  staticPrompt?: string;
+  inboxSummaryPath?: string;
+}
 
 export interface CodexComsConfig {
   agentId: string;
+  displayName?: string;
   workspace: string;
   dataDir: string;
   relay?: string;
   room?: string;
   token?: string;
+  wake?: WakeSettings;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface RuntimeStatus {
   connected: boolean;
+  agentId?: string;
+  pid?: number;
   relay?: string;
   room?: string;
   connectedAt?: string;
@@ -32,6 +44,12 @@ export function resolveDataDir(workspace: string, dataDir?: string): string {
     return dataDir;
   }
   return path.resolve(workspace, dataDir ?? DEFAULT_DATA_DIR);
+}
+
+export function validateAgentId(agentId: string): void {
+  if (!AGENT_ID_PATTERN.test(agentId)) {
+    throw new Error("agent id must contain only letters, numbers, dot, underscore, colon, or hyphen; use display names for spaces");
+  }
 }
 
 async function pathExists(file: string): Promise<boolean> {
@@ -64,12 +82,14 @@ export async function writeJson(file: string, value: unknown): Promise<void> {
 
 export async function initWorkspace(input: {
   agentId: string;
+  displayName?: string;
   workspace?: string;
   dataDir?: string;
   relay?: string;
   room?: string;
   token?: string;
 }): Promise<CodexComsConfig> {
+  validateAgentId(input.agentId);
   const workspace = resolveWorkspace(input.workspace);
   const dataDir = resolveDataDir(workspace, input.dataDir);
   const now = new Date().toISOString();
@@ -78,11 +98,13 @@ export async function initWorkspace(input: {
   const existing = await readJson<Partial<CodexComsConfig>>(configFile, {});
   const config: CodexComsConfig = {
     agentId: input.agentId,
+    displayName: input.displayName ?? existing.displayName,
     workspace,
     dataDir,
     relay: input.relay ?? existing.relay,
     room: input.room ?? existing.room ?? DEFAULT_ROOM,
     token: input.token ?? existing.token,
+    wake: existing.wake,
     createdAt: existing.createdAt ?? now,
     updatedAt: now
   };

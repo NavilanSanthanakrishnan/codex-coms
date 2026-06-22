@@ -41,4 +41,31 @@ describe("protocol schema", () => {
     });
     expect(safeParseProtocolMessage(message).success).toBe(false);
   });
+
+  it("accepts room peer status messages", () => {
+    const request = makeProtocolMessage({
+      type: "room.peers.request",
+      room: "pair",
+      from: "alice",
+      payload: {}
+    });
+    const response = makeProtocolMessage({
+      type: "room.peers.response",
+      room: "pair",
+      from: "relay",
+      to: "alice",
+      payload: {
+        requestId: request.id,
+        peers: [
+          {
+            agentId: "alice",
+            sockets: 1,
+            kinds: ["sidecar"]
+          }
+        ]
+      }
+    });
+    expect(parseProtocolMessage(request).type).toBe("room.peers.request");
+    expect(parseProtocolMessage(response).type).toBe("room.peers.response");
+  });
 });

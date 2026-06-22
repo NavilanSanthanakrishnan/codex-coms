@@ -71,6 +71,9 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms relay --host 127.0.0.1 --port 8787 --token <token>` starts the relay.
 - `codex-coms init --agent <agentId> --workspace <path>` creates local state.
 - `codex-coms connect --relay <url> --room <room> --agent <agentId> --token <token> --workspace <path>` starts a sidecar.
+- `codex-coms connect --replace ...` stops the recorded sidecar PID before reconnecting.
+- `codex-coms disconnect` stops the recorded sidecar process for the workspace.
+- `codex-coms rename --agent <agentId> --display-name "Human Name"` updates the local wire ID after the sidecar is stopped.
 - `codex-coms send --to <agentId> --text "message"` sends a peer message.
 - `codex-coms inbox` prints unread messages.
 - `codex-coms inbox --json` prints machine-readable inbox entries.
@@ -82,7 +85,14 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms read-remote --from <agentId> --grant <grantId> --path <relativePath>` reads a granted remote file.
 - `codex-coms send-file --to <agentId> --path <path>` transfers a file safely.
 - `codex-coms status` shows local state.
+- `codex-coms status --peers` asks the relay which agents are connected in the room.
+- `codex-coms wake notify` enables a local macOS notification for inbound inbox events.
+- `codex-coms wake disable` disables wake behavior.
 - `codex-coms demo` runs the local simulation.
+
+Wire agent IDs cannot contain spaces. Use IDs such as `shreyagent` and `navagent`; use display names for human-facing labels.
+
+The relay does not queue offline inboxes. If `send` says the target is offline, the peer must keep `codex-coms connect` running.
 
 ## Runtime Defaults
 
@@ -128,7 +138,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
   - `workspaceFromOptions`: resolves the workspace for a command.
   - `dataDirFromOptions`: resolves the local state directory.
   - `loadCliConfig`: loads `.codex-coms/config.json` for a command.
-  - Command handlers implement `relay`, `init`, `connect`, `send`, `inbox`, `grant`, `revoke`, `request-read`, `list-remote`, `read-remote`, `send-file`, `status`, and `demo`.
+  - Command handlers implement `relay`, `init`, `connect`, `disconnect`, `rename`, `send`, `inbox`, `grant`, `revoke`, `request-read`, `list-remote`, `read-remote`, `send-file`, `status`, `wake`, and `demo`.
 - `src/config.ts`: local configuration and state file helpers.
   - `resolveWorkspace`: normalizes a workspace path.
   - `resolveDataDir`: resolves `.codex-coms` or an override.
@@ -138,6 +148,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
   - `loadConfig`: loads local config.
   - `saveConfig`: writes local config.
   - `updateConfig`: merges and saves config updates.
+  - `validateAgentId`: rejects wire IDs with spaces or unsafe characters.
   - `loadRuntimeStatus`: reads sidecar status.
   - `setRuntimeStatus`: writes sidecar status.
 - `src/protocol/types.ts`: protocol type constants and shared TypeScript interfaces.
@@ -159,7 +170,8 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
   - `ProtocolConnection.close`: closes the socket.
   - `sendProtocolMessage`: sends one short-lived command message.
   - `requestProtocolResponse`: sends one command and waits for a correlated response.
-  - `sendAgentMessage`: sends an `agent.message` and writes local outbox/audit entries.
+  - `sendAgentMessage`: sends an `agent.message`, waits for peer acknowledgement, and writes local outbox/audit entries.
+  - `requestRoomPeers`: asks the relay for connected room members.
   - `sendFileToPeer`: sends a file offer, chunks, and completion frame.
   - `PeerSidecar.start`: connects the long-running sidecar and starts handling inbound messages.
   - `PeerSidecar.waitForClose`: waits until the sidecar socket closes.
@@ -173,6 +185,13 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
   - `readInboxEntries`: reads JSONL inbox entries.
   - `markInboxRead`: rewrites inbox entries as read.
   - `formatInbox`: creates Codex-friendly text output.
+- `src/peer/pid.ts`: sidecar PID helpers.
+  - `sidecarPidPath`: resolves `.codex-coms/sidecar.pid`.
+  - `readSidecarPid`: reads the sidecar PID if present.
+  - `isProcessRunning`: checks PID liveness.
+  - `writeSidecarPid`: writes the current sidecar PID.
+  - `clearSidecarPid`: removes the PID file when it belongs to the exiting process.
+  - `ensureNoDuplicateSidecar`: refuses duplicate sidecars or terminates the old one when `--replace` is used.
 - `src/workspace/grants.ts`: persisted read-only grant management.
   - `parseTtl`: parses TTL strings such as `2h`.
   - `loadGrants`: reads grants.
@@ -201,6 +220,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
   - `readAuditLog`: reads audit events.
 - `src/wake/codexWake.ts`: optional wake helper.
   - `maybeWakeCodex`: no-ops by default or runs a locally configured static command.
+  - `writeInboxSummary`: writes a local summary file for wake commands to inspect.
 - `src/demo/runDemo.ts`: end-to-end local simulation.
   - `runDemo`: starts relay and sidecars, sends a message, grants access, reads remotely, verifies denial, transfers a file, and returns a structured result.
 
@@ -208,5 +228,5 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
-- `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, and checks bad-token rejection.
+- `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
 - `test/demo.test.ts`: runs `runDemo` and verifies message delivery, remote read success, outside-read denial, file transfer, and audit log output.

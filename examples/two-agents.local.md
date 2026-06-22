@@ -48,6 +48,7 @@ Bob checks:
 ```bash
 cd /tmp/codex-coms-bob
 npx /path/to/codex-coms inbox
+npx /path/to/codex-coms status --peers
 npx /path/to/codex-coms grant --to alice --path notes --name notes --ttl 2h
 ```
 
