@@ -576,9 +576,18 @@ program.command("status")
     const failedOutbox = outbox.filter((entry) => !entry.delivered);
     const lastFailedSend = failedOutbox.at(-1);
     let peers: RoomPeer[] | undefined;
+    let relaySidecarConnected: boolean | undefined;
     if (options.peers) {
       try {
         peers = await requestRoomPeers(config);
+        const localPeer = peers.find((peer) => peer.agentId === config.agentId);
+        relaySidecarConnected = Boolean(localPeer?.kinds.includes("sidecar"));
+        if (relaySidecarConnected && !runtime.connected) {
+          warnings.push("relay sees local sidecar, but status file says disconnected");
+        }
+        if (!relaySidecarConnected && runtime.connected) {
+          warnings.push("status file says connected, but relay does not list local sidecar");
+        }
       } catch (error) {
         warnings.push(`could not fetch peers: ${(error as Error).message}`);
       }
@@ -613,6 +622,7 @@ program.command("status")
       auditLogPath: path.join(config.dataDir, "audit.jsonl"),
       tokenConfigured: Boolean(config.token),
       wakeEnabled: Boolean(config.wake?.enabled),
+      relaySidecarConnected,
       peers,
       warnings
     };
@@ -657,6 +667,9 @@ program.command("status")
       console.log(`audit: ${status.auditLogPath}`);
       console.log(`token configured: ${status.tokenConfigured}`);
       console.log(`wake enabled: ${status.wakeEnabled}`);
+      if (status.relaySidecarConnected !== undefined) {
+        console.log(`relay sidecar connected: ${status.relaySidecarConnected}`);
+      }
       if (status.peers) {
         console.log("peers:");
         for (const peer of status.peers) {

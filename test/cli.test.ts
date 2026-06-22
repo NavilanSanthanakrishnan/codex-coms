@@ -203,4 +203,64 @@ describe("CLI", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("warns when relay peer state disagrees with local runtime status", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-cli-relay-status-"));
+    const relay = new RelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "test-token"
+    });
+    const started = await relay.start();
+    let sidecar: PeerSidecar | undefined;
+    try {
+      const workspace = path.join(root, "alice");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "alice",
+        workspace,
+        relay: started.url,
+        room: "pair",
+        token: "test-token"
+      });
+      sidecar = new PeerSidecar(config);
+      await sidecar.start();
+      await setRuntimeStatus(config.dataDir, {
+        connected: false,
+        agentId: "alice",
+        pid: process.pid,
+        relay: started.url,
+        room: "pair",
+        connectedAt: "2026-06-22T16:00:00.000Z",
+        disconnectedAt: "2026-06-22T16:05:00.000Z"
+      });
+
+      const { stdout: statusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "status",
+        "--workspace",
+        workspace,
+        "--peers",
+        "--json"
+      ], { cwd: process.cwd() });
+      const status = JSON.parse(statusJson) as Record<string, unknown>;
+      expect(status.connected).toBe(false);
+      expect(status.relaySidecarConnected).toBe(true);
+      expect(status.warnings).toContain("relay sees local sidecar, but status file says disconnected");
+
+      const { stdout: statusText } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "status",
+        "--workspace",
+        workspace,
+        "--peers"
+      ], { cwd: process.cwd() });
+      expect(statusText).toContain("relay sidecar connected: true");
+      expect(statusText).toContain("warning: relay sees local sidecar, but status file says disconnected");
+    } finally {
+      await sidecar?.stop().catch(() => undefined);
+      await relay.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
