@@ -43,7 +43,19 @@ export function sanitizeTransferId(transferId: string): string {
   return safe;
 }
 
+function positiveSafeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function nonNegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 export async function prepareFileTransfer(filePath: string, chunkSize = DEFAULT_CHUNK_SIZE): Promise<PreparedFileTransfer> {
+  positiveSafeInteger(chunkSize, "chunkSize");
   const content = await readFile(filePath);
   if (content.byteLength > MAX_TRANSFER_BYTES) {
     throw new Error(`file exceeds max transfer size of ${MAX_TRANSFER_BYTES} bytes`);
@@ -68,23 +80,44 @@ export class FileTransferReceiver {
 
   constructor(private readonly dataDir: string, private readonly localAgentId: string) {}
 
+  private async rejectOffer(message: ProtocolMessage, transferId: string, reason: string): Promise<{ accepted: false; reason: string }> {
+    await appendAudit(this.dataDir, {
+      event: "file_rejected",
+      actor: this.localAgentId,
+      peer: message.from,
+      messageId: message.id,
+      result: "denied",
+      details: { transferId, reason }
+    });
+    return { accepted: false, reason };
+  }
+
   async acceptOffer(message: ProtocolMessage): Promise<{ accepted: boolean; reason?: string }> {
     const payload = message.payload as Record<string, unknown>;
     const transferId = String(payload.transferId);
     const filename = sanitizeFilename(String(payload.filename));
     const size = Number(payload.size);
     const sha256 = String(payload.sha256);
+    const chunkSize = Number(payload.chunkSize);
     const chunkCount = Number(payload.chunkCount);
+    if (!nonNegativeSafeInteger(size)) {
+      return this.rejectOffer(message, transferId, "invalid transfer size");
+    }
     if (size > MAX_TRANSFER_BYTES) {
-      await appendAudit(this.dataDir, {
-        event: "file_rejected",
-        actor: this.localAgentId,
-        peer: message.from,
-        messageId: message.id,
-        result: "denied",
-        details: { transferId, reason: "size limit" }
-      });
-      return { accepted: false, reason: "file exceeds max transfer size" };
+      return this.rejectOffer(message, transferId, "file exceeds max transfer size");
+    }
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      return this.rejectOffer(message, transferId, "invalid transfer hash");
+    }
+    if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) {
+      return this.rejectOffer(message, transferId, "invalid chunk size");
+    }
+    if (!nonNegativeSafeInteger(chunkCount)) {
+      return this.rejectOffer(message, transferId, "invalid chunk count");
+    }
+    const expectedChunkCount = size === 0 ? 0 : Math.ceil(size / chunkSize);
+    if (chunkCount !== expectedChunkCount) {
+      return this.rejectOffer(message, transferId, "chunk count does not match size");
     }
     this.transfers.set(transferId, {
       from: message.from,
