@@ -42,6 +42,10 @@ cloudflared tunnel --url http://127.0.0.1:8787
 
 Share the printed `https://...trycloudflare.com` URL as `wss://...trycloudflare.com` for codex-coms clients.
 
+## Relay Diagnostics
+
+Relay logs include each connection's agent ID, room, socket kind, and WebSocket close code/reason. When sidecars repeatedly reconnect through a tunnel, check the relay log alongside each sidecar's `.codex-coms/sidecar.log` to see whether the relay, tunnel, or client is closing the socket.
+
 ## Token Handling
 
 Generate a fresh room token per collaboration session.
