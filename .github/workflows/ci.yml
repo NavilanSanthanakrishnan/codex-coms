@@ -65,4 +65,5 @@ jobs:
           npm install --prefix "$install_dir" "$pack_dir"/*.tgz
           "$install_dir/node_modules/.bin/codex-coms" --help
           "$install_dir/node_modules/.bin/codex-coms" init --agent alice --workspace "$workspace_dir"
-          "$install_dir/node_modules/.bin/codex-coms" status --workspace "$workspace_dir" --json
+          status_json="$("$install_dir/node_modules/.bin/codex-coms" status --workspace "$workspace_dir" --json)"
+          node -e 'const status = JSON.parse(process.argv[1]); if (status.agentId !== "alice") throw new Error(`expected alice, got ${status.agentId}`); if (status.workspace !== process.argv[2]) throw new Error(`expected workspace ${process.argv[2]}, got ${status.workspace}`);' "$status_json" "$workspace_dir"
