@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, drainWakeEventById, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, drainWakeEventById, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, triggerPendingWakeCommands, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -714,9 +714,24 @@ wake.command("trigger")
   .description("start the configured wake command for the next pending unattempted wake event")
   .option("--json", "print JSON")
   .option("--event <id>", "target a pending wake event by wake event id or inbox entry id")
+  .option("--all", "start wake commands for all eligible pending events when concurrent wake is enabled")
   .option("--retry-attempted", "retry the next pending event even if it already attempted a wake command")
   .action(async (options) => {
     const config = await loadCliConfig(options);
+    if (options.all && options.event) {
+      throw new Error("--all cannot be combined with --event");
+    }
+    if (options.all) {
+      const results = await triggerPendingWakeCommands(config.dataDir, config.agentId, config.wake, {
+        retryAttempted: Boolean(options.retryAttempted)
+      });
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+        return;
+      }
+      printWakeTriggerResults(results);
+      return;
+    }
     const result = await triggerPendingWakeCommand(config.dataDir, config.agentId, config.wake, {
       retryAttempted: Boolean(options.retryAttempted),
       eventId: options.event
@@ -740,6 +755,28 @@ wake.command("trigger")
     }
   });
 
+function printWakeTriggerResults(results: Awaited<ReturnType<typeof triggerPendingWakeCommands>>): void {
+  const started = results.filter((result) => result.reason === "started");
+  if (started.length > 0) {
+    console.log(`Started wake command for ${started.length} pending event(s): ${started.map((result) => result.event?.id).filter(Boolean).join(", ")}.`);
+    const notStarted = results.filter((result) => result.reason === "not_started");
+    if (notStarted.length > 0) {
+      console.log(`${notStarted.length} pending wake event(s) were not started. Check the audit log.`);
+    }
+    return;
+  }
+  const [first] = results;
+  if (!first || first.reason === "no_pending") {
+    console.log("No pending wake events need a wake command.");
+  } else if (first.reason === "not_configured") {
+    console.log("No wake command is configured. Run codex-coms wake notify or codex-coms wake command first.");
+  } else if (first.reason === "already_attempted") {
+    console.log("All pending wake events already attempted a wake command. Pass --retry-attempted to retry locally.");
+  } else {
+    console.log("No wake commands were started. Check the audit log.");
+  }
+}
+
 function printConfiguredWakeCatchup(result: Awaited<ReturnType<typeof triggerPendingWakeCommand>>): void {
   if (result.reason === "started") {
     console.log(`Started wake command for pending event ${result.event?.id}.`);
@@ -747,6 +784,28 @@ function printConfiguredWakeCatchup(result: Awaited<ReturnType<typeof triggerPen
     console.log(`Pending wake event ${result.event?.id} was found, but the wake command was not started. Check the audit log.`);
   } else if (result.reason === "already_attempted") {
     console.log("Pending wake events already attempted a wake command. Pass wake trigger --retry-attempted to retry one locally.");
+  }
+}
+
+function printConfiguredWakeCatchupResults(results: Awaited<ReturnType<typeof triggerPendingWakeCommands>>): void {
+  const started = results.filter((result) => result.reason === "started");
+  if (started.length > 0) {
+    console.log(`Started wake command for ${started.length} pending event(s): ${started.map((result) => result.event?.id).filter(Boolean).join(", ")}.`);
+    return;
+  }
+  const [first] = results;
+  if (first?.reason === "not_started") {
+    console.log(`Pending wake event ${first.event?.id} was found, but the wake command was not started. Check the audit log.`);
+  } else if (first?.reason === "already_attempted") {
+    console.log("Pending wake events already attempted a wake command. Pass wake trigger --retry-attempted to retry locally.");
+  }
+}
+
+async function triggerConfiguredWakeCatchup(config: CodexComsConfig): Promise<void> {
+  if (config.wake?.allowConcurrent) {
+    printConfiguredWakeCatchupResults(await triggerPendingWakeCommands(config.dataDir, config.agentId, config.wake));
+  } else {
+    printConfiguredWakeCatchup(await triggerPendingWakeCommand(config.dataDir, config.agentId, config.wake));
   }
 }
 
@@ -777,7 +836,7 @@ wake.command("notify")
       }
     });
     console.log("wake enabled with local macOS notification");
-    printConfiguredWakeCatchup(await triggerPendingWakeCommand(next.dataDir, next.agentId, next.wake));
+    await triggerConfiguredWakeCatchup(next);
   });
 
 wake.command("command")
@@ -802,7 +861,7 @@ wake.command("command")
       }
     });
     console.log(`wake enabled with command ${command}`);
-    printConfiguredWakeCatchup(await triggerPendingWakeCommand(next.dataDir, next.agentId, next.wake));
+    await triggerConfiguredWakeCatchup(next);
   });
 
 program.command("demo")

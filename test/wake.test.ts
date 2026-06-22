@@ -553,6 +553,114 @@ describe("wake events", () => {
     }
   });
 
+  it("triggers all eligible pending wake events when concurrent wake is enabled", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-trigger-all-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const marker = path.join(root, "trigger-all-marker.txt");
+      const script = path.join(root, "wake-trigger-all-script.mjs");
+      await writeFile(script, [
+        "import { appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "await appendFile(marker, `${process.env.CODEX_COMS_WAKE_EVENT_ID}\\n`);"
+      ].join("\n"), "utf8");
+      const entry = (id: string) => ({
+        id,
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary: `message ${id}`,
+        read: false,
+        payload: { text: `message ${id}` }
+      });
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: entry("message-trigger-all-1")
+      });
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: entry("message-trigger-all-2")
+      });
+
+      const { stdout: commandStdout } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "command",
+        "--allow-concurrent",
+        process.execPath,
+        script,
+        marker
+      ], { cwd: process.cwd() });
+      expect(commandStdout).toContain("Started wake command for 2 pending event(s): wake_message-trigger-all-1, wake_message-trigger-all-2.");
+      await waitFor(async () => {
+        const content = await readFile(marker, "utf8").catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        });
+        return content?.split("\n").filter(Boolean).length === 2 ? content : undefined;
+      });
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: entry("message-trigger-all-3")
+      });
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: entry("message-trigger-all-4")
+      });
+
+      const { stdout: triggerAllJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--all",
+        "--json"
+      ], { cwd: process.cwd() });
+      const triggerAll = JSON.parse(triggerAllJson) as Array<Record<string, unknown>>;
+      expect(triggerAll.map((result) => result.reason)).toEqual(["started", "started"]);
+      expect(triggerAll.map((result) => (result.event as Record<string, unknown>).id)).toEqual([
+        "wake_message-trigger-all-3",
+        "wake_message-trigger-all-4"
+      ]);
+
+      const finalMarker = await waitFor(async () => {
+        const content = await readFile(marker, "utf8");
+        return content.split("\n").filter(Boolean).length === 4 ? content : undefined;
+      });
+      expect(finalMarker.split("\n").filter(Boolean).sort()).toEqual([
+        "wake_message-trigger-all-1",
+        "wake_message-trigger-all-2",
+        "wake_message-trigger-all-3",
+        "wake_message-trigger-all-4"
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("drains a targeted pending wake event by wake id or inbox id", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-drain-target-"));
     try {

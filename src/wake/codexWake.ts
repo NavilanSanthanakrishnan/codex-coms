@@ -89,6 +89,10 @@ export interface WakeTriggerOptions {
   eventId?: string;
 }
 
+export interface WakeTriggerManyOptions {
+  retryAttempted?: boolean;
+}
+
 const MAX_DRAINED_IDS = 5000;
 const MAX_COMMAND_ATTEMPTED_IDS = 5000;
 const DRAIN_LOCK_STALE_MS = 5_000;
@@ -746,6 +750,44 @@ export async function triggerPendingWakeCommand(dataDir: string, localAgentId: s
     retriedAttempted,
     target: options.eventId
   };
+}
+
+export async function triggerPendingWakeCommands(dataDir: string, localAgentId: string, config: WakeConfig | undefined, options: WakeTriggerManyOptions = {}): Promise<WakeTriggerResult[]> {
+  if (!config?.enabled || !config.command?.length) {
+    return [{ commandStarted: false, reason: "not_configured" }];
+  }
+  const [events, commandState] = await Promise.all([
+    readPendingWakeEvents(dataDir),
+    readWakeCommandState(dataDir)
+  ]);
+  if (events.length === 0) {
+    return [{ commandStarted: false, reason: "no_pending" }];
+  }
+  const attempted = new Set(commandState.attemptedIds);
+  let retriedAttempted = false;
+  let candidates = events.filter((item) => !attempted.has(item.id));
+  if (candidates.length === 0 && options.retryAttempted) {
+    candidates = events.filter((item) => attempted.has(item.id));
+    retriedAttempted = candidates.length > 0;
+  }
+  if (candidates.length === 0) {
+    return [{ commandStarted: false, reason: "already_attempted" }];
+  }
+  const eventsToTrigger = config.allowConcurrent ? candidates : candidates.slice(0, 1);
+  const results: WakeTriggerResult[] = [];
+  for (const event of eventsToTrigger) {
+    const commandStarted = await maybeWakeCodex(dataDir, localAgentId, config, event, {
+      eventPath: event.eventPath ?? eventPathFor(dataDir, event.id),
+      inboxSummaryPath: event.inboxSummaryPath ?? inboxSummaryPathFor(dataDir, event.id)
+    });
+    results.push({
+      event,
+      commandStarted,
+      reason: commandStarted ? "started" : "not_started",
+      retriedAttempted
+    });
+  }
+  return results;
 }
 
 export async function dispatchWakeEvent(input: {
