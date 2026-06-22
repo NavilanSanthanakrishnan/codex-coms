@@ -145,6 +145,30 @@ describe("relay server", () => {
     }
   });
 
+  it("rejects pending waits when the socket closes", async () => {
+    const relay = new RelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "test-token"
+    });
+    const started = await relay.start();
+    const alice = await ProtocolConnection.open({
+      relay: started.url,
+      room: "pair",
+      agentId: "alice",
+      token: "test-token",
+      kind: "relay-test"
+    });
+    try {
+      const waiting = alice.waitFor(() => false, 5000);
+      alice.close();
+      await expect(waiting).rejects.toThrow("WebSocket connection closed before protocol response");
+    } finally {
+      alice.close();
+      await relay.stop();
+    }
+  });
+
   it("logs connection kind and close diagnostics", async () => {
     const logs: string[] = [];
     const relay = new RelayServer({

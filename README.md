@@ -198,7 +198,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 - `src/peer/client.ts`: client connection helpers and sidecar implementation.
   - `ProtocolConnection.open`: opens a WebSocket connection and performs `hello`.
   - `ProtocolConnection.send`: sends a validated protocol message.
-  - `ProtocolConnection.waitFor`: waits for a matching response.
+  - `ProtocolConnection.waitFor`: waits for a matching response and fails fast if the socket closes.
   - `ProtocolConnection.close`: closes the socket.
   - `sendProtocolMessage`: sends one short-lived command message.
   - `requestProtocolResponse`: sends one command and waits for a correlated response.
