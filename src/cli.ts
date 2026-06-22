@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, drainWakeEventById, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -662,16 +662,17 @@ wake.command("queue")
 wake.command("drain")
   .description("claim pending wake events for a local thread or automation")
   .option("--json", "print JSON")
+  .option("--event <id>", "claim one pending wake event by wake event id or inbox entry id")
   .option("--limit <count>", "maximum events to drain", "20")
   .action(async (options) => {
     const config = await loadCliConfig(options);
-    const limit = Number(options.limit);
-    if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error("--limit must be a positive integer");
-    }
-    const events = await drainPendingWakeEvents(config.dataDir, limit);
+    const events = options.event
+      ? await drainWakeEventById(config.dataDir, options.event)
+      : await drainPendingWakeEvents(config.dataDir, positiveIntegerOption(options.limit, "--limit"));
     if (options.json) {
       console.log(JSON.stringify(events, null, 2));
+    } else if (options.event && events.length === 0) {
+      console.log(`No pending wake event matched ${options.event}.`);
     } else {
       console.log(formatWakeEvents(events));
       console.log(`Drained ${events.length} wake event(s).`);

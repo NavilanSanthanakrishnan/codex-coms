@@ -428,6 +428,22 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number, loc
   }
 }
 
+export async function drainWakeEventById(dataDir: string, targetId: string, lockTimeoutMs = 10_000): Promise<WakeEvent[]> {
+  if (!targetId) {
+    throw new Error("targetId must be provided");
+  }
+  await mkdir(dataDir, { recursive: true });
+  const release = await acquireDrainLock(dataDir, lockTimeoutMs);
+  try {
+    const events = (await readPendingWakeEvents(dataDir))
+      .filter((event) => event.id === targetId || event.inboxEntryId === targetId);
+    await markWakeEventsDrained(dataDir, events.map((event) => event.id));
+    return events;
+  } finally {
+    await release();
+  }
+}
+
 export async function drainWakeEventsForInboxEntries(dataDir: string, inboxEntryIds: string[], lockTimeoutMs = 5_000): Promise<number> {
   if (inboxEntryIds.length === 0) {
     return 0;
@@ -766,7 +782,9 @@ export async function writeInboxSummary(dataDir: string, event: WakeEvent): Prom
     `priority: ${event.priority}`,
     `timestamp: ${event.messageTimestamp}`,
     `summary: ${event.summary}`,
-    "Run codex-coms wake drain to claim pending wake events, then codex-coms inbox to inspect the full local inbox before taking action."
+    `Claim this event with: codex-coms wake drain --event ${event.id} --json`,
+    `The matching inbox entry is: ${event.inboxEntryId}`,
+    "Use codex-coms inbox only when the adapter needs the full local message payload."
   ].join("\n");
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${summary}\n`, "utf8");
