@@ -55,6 +55,14 @@ export interface WakeDispatchResult {
   commandStarted: boolean;
 }
 
+export type WakeTriggerReason = "not_configured" | "no_pending" | "already_attempted" | "started" | "not_started";
+
+export interface WakeTriggerResult {
+  event?: WakeEvent;
+  commandStarted: boolean;
+  reason: WakeTriggerReason;
+}
+
 export interface WakeWaitOptions {
   limit?: number;
   timeoutMs?: number;
@@ -540,9 +548,7 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
     result: "ok",
     details: { command, wakeEventId: event.id, priority: event.priority }
   });
-  if (!config.allowConcurrent) {
-    await markWakeCommandAttempted(dataDir, event.id);
-  }
+  await markWakeCommandAttempted(dataDir, event.id);
   try {
     const child = spawn(command, safeArgs, {
       shell: false,
@@ -610,6 +616,33 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
     });
     return false;
   }
+}
+
+export async function triggerPendingWakeCommand(dataDir: string, localAgentId: string, config: WakeConfig | undefined): Promise<WakeTriggerResult> {
+  if (!config?.enabled || !config.command?.length) {
+    return { commandStarted: false, reason: "not_configured" };
+  }
+  const [events, commandState] = await Promise.all([
+    readPendingWakeEvents(dataDir),
+    readWakeCommandState(dataDir)
+  ]);
+  if (events.length === 0) {
+    return { commandStarted: false, reason: "no_pending" };
+  }
+  const attempted = new Set(commandState.attemptedIds);
+  const event = events.find((item) => !attempted.has(item.id));
+  if (!event) {
+    return { commandStarted: false, reason: "already_attempted" };
+  }
+  const commandStarted = await maybeWakeCodex(dataDir, localAgentId, config, event, {
+    eventPath: event.eventPath ?? eventPathFor(dataDir, event.id),
+    inboxSummaryPath: event.inboxSummaryPath ?? inboxSummaryPathFor(dataDir, event.id)
+  });
+  return {
+    event,
+    commandStarted,
+    reason: commandStarted ? "started" : "not_started"
+  };
 }
 
 export async function dispatchWakeEvent(input: {

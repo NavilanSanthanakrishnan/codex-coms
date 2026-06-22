@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeEvents, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -688,6 +688,29 @@ wake.command("wait")
     } else {
       console.log(formatWakeEvents(events));
       console.log(`Drained ${events.length} wake event(s).`);
+    }
+  });
+
+wake.command("trigger")
+  .description("start the configured wake command for the next pending unattempted wake event")
+  .option("--json", "print JSON")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const result = await triggerPendingWakeCommand(config.dataDir, config.agentId, config.wake);
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    if (result.reason === "not_configured") {
+      console.log("No wake command is configured. Run codex-coms wake notify or codex-coms wake command first.");
+    } else if (result.reason === "no_pending") {
+      console.log("No pending wake events need a wake command.");
+    } else if (result.reason === "already_attempted") {
+      console.log("All pending wake events already attempted a wake command.");
+    } else if (result.reason === "started") {
+      console.log(`Started wake command for ${result.event?.id}.`);
+    } else {
+      console.log(`Wake command was not started for ${result.event?.id}; it may already be running or failed to spawn. Check the audit log.`);
     }
   });
 
