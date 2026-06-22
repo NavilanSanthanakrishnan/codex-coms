@@ -113,6 +113,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms wake queue` shows pending local wake events.
 - `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper.
 - `codex-coms wake wait --json` blocks until local wake events are available, then claims them for a local adapter.
+- `codex-coms wake trigger --json` starts the configured local wake command for the next pending wake event that has not already attempted one.
 - `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned; when the handler exits, the next pending unattempted event gets one catch-up command. Pass `--allow-concurrent` when one process per event is intentional.
 - `codex-coms wake disable` disables wake behavior.
 - `codex-coms demo` runs the local simulation.
@@ -259,6 +260,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `markWakeEventsDrained`: marks wake events as claimed.
   - `drainWakeEventsForInboxEntries`: claims pending wake events tied to handled inbox entries.
   - `waitForPendingWakeEvents`: blocks until wake events are available, then claims them.
+  - `triggerPendingWakeCommand`: starts the configured local wake command for the next pending unattempted event.
   - `maybeWakeCodex`: no-ops by default or runs a locally configured static command with local event paths and metadata.
   - `writeInboxSummary`: writes per-event summary files and a latest summary file for wake commands to inspect.
 - `src/demo/runDemo.ts`: end-to-end local simulation.

@@ -50,6 +50,7 @@ Every inbound inbox event also creates a local wake event. Wake events are durab
 codex-coms wake queue
 codex-coms wake drain --json
 codex-coms wake wait --json
+codex-coms wake trigger --json
 ```
 
 Optional command wake support is disabled by default. If enabled locally, wake can run only a locally configured command with static local inputs plus local event paths and environment metadata. Remote peer text is never interpolated into shell commands.
@@ -57,6 +58,7 @@ Optional command wake support is disabled by default. If enabled locally, wake c
 Available wake modes:
 
 - `codex-coms wake wait --json`: block a local adapter until wake events arrive, then claim those events without repeatedly checking raw inbox state.
+- `codex-coms wake trigger --json`: after a local wake command is configured, start it for the next pending wake event that has not already attempted one. This is useful when the adapter or Codex thread comes back after events were already queued.
 - `codex-coms wake notify`: show a local macOS notification when an inbox event arrives.
 - `codex-coms wake command /absolute/path [args...] --prompt "<static prompt>"`: run a local command chosen by the user. The command receives static args and, by default, the local wake event JSON path as the final argument. It also receives `CODEX_COMS_WAKE_EVENT_PATH`, `CODEX_COMS_WAKE_FROM`, `CODEX_COMS_WAKE_TYPE`, and related metadata in the environment. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned. Pass `--allow-concurrent` when one process per event is intentional.
 

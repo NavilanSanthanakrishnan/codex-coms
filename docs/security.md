@@ -22,6 +22,7 @@ codex-coms treats the relay as untrusted transport and each peer message as untr
 - Received files are SHA-256 checked before being written.
 - Remote peers cannot configure local wake commands.
 - Inbound messages always create local wake event records, but command execution can trigger only after the local user explicitly configures it.
+- `wake trigger` can only start the already configured local wake command for local pending events; it does not accept remote-provided commands.
 - Wake commands receive local event file paths and metadata only; remote peer text is not passed as shell input.
 - `connect --daemon` starts from saved local config, so the daemon child does not need the room token in its process arguments.
 - `send` records `message_sent` only after a peer acknowledgement; failed sends are logged as `send_failed` and written to the local outbox as failed delivery records.
@@ -71,4 +72,4 @@ The MVP does not implement offline relay queues. Peers should keep sidecars runn
 
 The MVP does not claim that received files are safe to execute. Treat transfers as data and inspect them first.
 
-codex-coms cannot safely interrupt an arbitrary Codex thread by itself. It records durable local wake events that a local Codex automation, trusted `codex exec` wrapper, or app integration can claim with `codex-coms wake drain` and then decide whether to steer an active task or wake an inactive thread. Configured wake commands are single-flight by default, so a burst of inbound events does not let a remote peer force duplicate local handler processes.
+codex-coms cannot safely interrupt an arbitrary Codex thread by itself. It records durable local wake events that a local Codex automation, trusted `codex exec` wrapper, or app integration can claim with `codex-coms wake drain` or feed into a locally configured handler with `codex-coms wake trigger`. That local handler decides whether to steer an active task or wake an inactive thread. Configured wake commands are single-flight by default, so a burst of inbound events does not let a remote peer force duplicate local handler processes.
