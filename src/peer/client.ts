@@ -34,8 +34,15 @@ export interface ProtocolConnectionOptions {
   kind?: "sidecar" | "cli" | "relay-test";
 }
 
+interface ProtocolWaiter {
+  filter: (message: ProtocolMessage) => boolean;
+  resolve: (message: ProtocolMessage) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
 export class ProtocolConnection {
-  private readonly waiters = new Set<(message: ProtocolMessage) => void>();
+  private readonly waiters = new Set<ProtocolWaiter>();
   private closed = false;
 
   private constructor(private readonly ws: WebSocket, private readonly options: ProtocolConnectionOptions) {}
@@ -55,11 +62,17 @@ export class ProtocolConnection {
         return;
       }
       for (const waiter of connection.waiters) {
-        waiter(message);
+        if (!waiter.filter(message)) {
+          continue;
+        }
+        clearTimeout(waiter.timer);
+        connection.waiters.delete(waiter);
+        waiter.resolve(message);
       }
     });
     ws.on("close", () => {
       connection.closed = true;
+      connection.rejectWaiters(new Error("WebSocket connection closed before protocol response"));
     });
     connection.send(makeProtocolMessage({
       type: "hello",
@@ -83,25 +96,29 @@ export class ProtocolConnection {
   }
 
   waitFor(filter: (message: ProtocolMessage) => boolean, timeoutMs: number): Promise<ProtocolMessage> {
+    if (this.closed || this.ws.readyState === WebSocket.CLOSED || this.ws.readyState === WebSocket.CLOSING) {
+      return Promise.reject(new Error("WebSocket connection closed before protocol response"));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters.delete(waiter);
         reject(new Error("timed out waiting for protocol response"));
       }, timeoutMs);
-      const waiter = (message: ProtocolMessage) => {
-        if (!filter(message)) {
-          return;
-        }
-        clearTimeout(timer);
-        this.waiters.delete(waiter);
-        resolve(message);
-      };
+      const waiter: ProtocolWaiter = { filter, resolve, reject, timer };
       this.waiters.add(waiter);
     });
   }
 
   close(): void {
     this.ws.close();
+  }
+
+  private rejectWaiters(error: Error): void {
+    for (const waiter of this.waiters) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    this.waiters.clear();
   }
 }
 
