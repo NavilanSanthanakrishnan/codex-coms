@@ -63,6 +63,14 @@ export interface WakeTriggerResult {
   reason: WakeTriggerReason;
 }
 
+export interface WakeCommandStatus {
+  pendingWakeEvents: number;
+  pendingWakeCommandEvents: number;
+  attemptedWakeCommandEvents: number;
+  wakeCommandRunning: boolean;
+  wakeCommandPid?: number;
+}
+
 export interface WakeWaitOptions {
   limit?: number;
   timeoutMs?: number;
@@ -320,6 +328,23 @@ export async function readPendingWakeEvents(dataDir: string): Promise<WakeEvent[
   ]);
   const drained = new Set(state.drainedIds);
   return events.filter((event) => !drained.has(event.id));
+}
+
+export async function readWakeCommandStatus(dataDir: string): Promise<WakeCommandStatus> {
+  const [events, commandState, wakeCommandPid] = await Promise.all([
+    readPendingWakeEvents(dataDir),
+    readWakeCommandState(dataDir),
+    readLockPid(wakeCommandLockPath(dataDir))
+  ]);
+  const attempted = new Set(commandState.attemptedIds);
+  const pendingWakeCommandEvents = events.filter((event) => !attempted.has(event.id)).length;
+  return {
+    pendingWakeEvents: events.length,
+    pendingWakeCommandEvents,
+    attemptedWakeCommandEvents: events.length - pendingWakeCommandEvents,
+    wakeCommandRunning: Boolean(wakeCommandPid && isProcessRunning(wakeCommandPid)),
+    wakeCommandPid
+  };
 }
 
 export async function markWakeEventsDrained(dataDir: string, ids: string[]): Promise<number> {
