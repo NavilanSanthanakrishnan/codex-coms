@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -118,17 +118,19 @@ describe("wake events", () => {
       });
 
       expect(result.commandStarted).toBe(true);
-      const markerContent = await waitFor(async () => {
+      const markerJson = await waitFor(async () => {
         try {
-          return await readFile(marker, "utf8");
+          return JSON.parse(await readFile(marker, "utf8")) as Record<string, string>;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          if (error instanceof SyntaxError) {
             return undefined;
           }
           throw error;
         }
       });
-      const markerJson = JSON.parse(markerContent) as Record<string, string>;
       expect(markerJson.eventPathArg).toBe(result.eventPath);
       expect(markerJson.eventPathEnv).toBe(result.eventPath);
       expect(markerJson.agent).toBe("bob");
@@ -253,7 +255,9 @@ describe("wake events", () => {
         localAgentId: "bob",
         entry
       });
-      await mkdir(path.join(config.dataDir, "wake-drain.lock"), { recursive: true });
+      const lockPath = path.join(config.dataDir, "wake-drain.lock");
+      await mkdir(lockPath, { recursive: true });
+      await writeFile(path.join(lockPath, "pid"), `${process.pid}\n`, "utf8");
 
       let stderr = "";
       try {
@@ -291,6 +295,39 @@ describe("wake events", () => {
 
       expect(events).toEqual([]);
       expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a stale wake drain lock owned by a dead process", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-dead-lock-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const lockPath = path.join(dataDir, "wake-drain.lock");
+      await mkdir(lockPath, { recursive: true });
+      await writeFile(path.join(lockPath, "pid"), "99999999\n", "utf8");
+      const staleTime = new Date(Date.now() - 10_000);
+      await utimes(lockPath, staleTime, staleTime);
+
+      await expect(drainPendingWakeEvents(dataDir, 1, 500)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not remove a stale wake drain lock owned by a live process", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-live-lock-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const lockPath = path.join(dataDir, "wake-drain.lock");
+      await mkdir(lockPath, { recursive: true });
+      await writeFile(path.join(lockPath, "pid"), `${process.pid}\n`, "utf8");
+      const staleTime = new Date(Date.now() - 10_000);
+      await utimes(lockPath, staleTime, staleTime);
+
+      await expect(drainPendingWakeEvents(dataDir, 1, 100)).rejects.toThrow("timed out waiting for wake drain lock");
+      await expect(readFile(path.join(lockPath, "pid"), "utf8")).resolves.toBe(`${process.pid}\n`);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
