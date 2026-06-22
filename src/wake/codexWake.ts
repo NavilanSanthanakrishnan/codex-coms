@@ -38,6 +38,11 @@ interface WakeState {
   updatedAt?: string;
 }
 
+interface WakeCommandState {
+  attemptedIds: string[];
+  updatedAt?: string;
+}
+
 export interface WakeDispatchPaths {
   eventPath: string;
   inboxSummaryPath: string;
@@ -57,6 +62,7 @@ export interface WakeWaitOptions {
 }
 
 const MAX_DRAINED_IDS = 5000;
+const MAX_COMMAND_ATTEMPTED_IDS = 5000;
 const DRAIN_LOCK_STALE_MS = 5_000;
 const COMMAND_LOCK_STALE_MS = 5_000;
 const DRAIN_LOCK_TIMEOUT_MESSAGE = "timed out waiting for wake drain lock";
@@ -79,6 +85,10 @@ function wakeDrainLockPath(dataDir: string): string {
 
 function wakeCommandLockPath(dataDir: string): string {
   return path.join(dataDir, "wake-command.lock");
+}
+
+function wakeCommandStatePath(dataDir: string): string {
+  return path.join(dataDir, "wake-command-state.json");
 }
 
 function safeEventBasename(id: string): string {
@@ -208,15 +218,18 @@ async function writeCommandSlotPid(lockPath: string, pid: number): Promise<void>
   await writeFile(path.join(lockPath, "pid"), `${pid}\n`, "utf8");
 }
 
-async function releaseCommandSlotIfOwner(lockPath: string, pid: number): Promise<void> {
+async function releaseCommandSlotIfOwner(lockPath: string, pid: number): Promise<boolean> {
   try {
     if ((await readLockPid(lockPath)) === pid) {
       await rm(lockPath, { recursive: true, force: true });
+      return true;
     }
+    return false;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
+    return false;
   }
 }
 
@@ -275,6 +288,21 @@ export async function readWakeEvents(dataDir: string): Promise<WakeEvent[]> {
 
 export async function readWakeState(dataDir: string): Promise<WakeState> {
   return readJson<WakeState>(wakeStatePath(dataDir), { drainedIds: [] });
+}
+
+async function readWakeCommandState(dataDir: string): Promise<WakeCommandState> {
+  return readJson<WakeCommandState>(wakeCommandStatePath(dataDir), { attemptedIds: [] });
+}
+
+async function markWakeCommandAttempted(dataDir: string, id: string): Promise<void> {
+  const state = await readWakeCommandState(dataDir);
+  const attempted = new Set(state.attemptedIds);
+  attempted.add(id);
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(wakeCommandStatePath(dataDir), `${JSON.stringify({
+    attemptedIds: [...attempted].slice(-MAX_COMMAND_ATTEMPTED_IDS),
+    updatedAt: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
 }
 
 export async function readPendingWakeEvents(dataDir: string): Promise<WakeEvent[]> {
@@ -462,6 +490,25 @@ export function formatWakeEvents(events: WakeEvent[]): string {
   }).join("\n");
 }
 
+async function maybeDispatchNextPendingWakeCommand(dataDir: string, localAgentId: string, config: WakeConfig | undefined): Promise<void> {
+  if (!config?.enabled || !config.command?.length || config.allowConcurrent) {
+    return;
+  }
+  const [events, commandState] = await Promise.all([
+    readPendingWakeEvents(dataDir),
+    readWakeCommandState(dataDir)
+  ]);
+  const attempted = new Set(commandState.attemptedIds);
+  const next = events.find((event) => !attempted.has(event.id));
+  if (!next) {
+    return;
+  }
+  await maybeWakeCodex(dataDir, localAgentId, config, next, {
+    eventPath: next.eventPath ?? eventPathFor(dataDir, next.id),
+    inboxSummaryPath: next.inboxSummaryPath ?? inboxSummaryPathFor(dataDir, next.id)
+  });
+}
+
 export async function maybeWakeCodex(dataDir: string, localAgentId: string, config: WakeConfig | undefined, event: WakeEvent, paths: WakeDispatchPaths): Promise<boolean> {
   if (!config?.enabled || !config.command?.length) {
     return false;
@@ -493,6 +540,9 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
     result: "ok",
     details: { command, wakeEventId: event.id, priority: event.priority }
   });
+  if (!config.allowConcurrent) {
+    await markWakeCommandAttempted(dataDir, event.id);
+  }
   try {
     const child = spawn(command, safeArgs, {
       shell: false,
@@ -512,13 +562,20 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
       }
     });
     const childPid = child.pid;
-    const releaseCommandSlot = () => {
+    const releaseCommandSlot = (dispatchNext: boolean) => {
       if (commandSlot && childPid) {
-        releaseCommandSlotIfOwner(commandSlot.lockPath, childPid).catch(() => undefined);
+        releaseCommandSlotIfOwner(commandSlot.lockPath, childPid)
+          .then((released) => {
+            if (released && dispatchNext) {
+              return maybeDispatchNextPendingWakeCommand(dataDir, localAgentId, config);
+            }
+            return undefined;
+          })
+          .catch(() => undefined);
       }
     };
     child.once("error", (error) => {
-      releaseCommandSlot();
+      releaseCommandSlot(false);
       appendAudit(dataDir, {
         event: "wake_failed",
         actor: localAgentId,
@@ -526,12 +583,14 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
         details: { command, wakeEventId: event.id, reason: error.message }
       }).catch(() => undefined);
     });
-    child.once("exit", releaseCommandSlot);
+    child.once("exit", () => releaseCommandSlot(true));
     if (commandSlot) {
       if (childPid) {
         await writeCommandSlotPid(commandSlot.lockPath, childPid);
         if (!isProcessRunning(childPid)) {
-          await releaseCommandSlotIfOwner(commandSlot.lockPath, childPid);
+          if (await releaseCommandSlotIfOwner(commandSlot.lockPath, childPid)) {
+            await maybeDispatchNextPendingWakeCommand(dataDir, localAgentId, config);
+          }
         }
       } else {
         await rm(commandSlot.lockPath, { recursive: true, force: true });
