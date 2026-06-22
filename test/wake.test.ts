@@ -394,6 +394,44 @@ describe("wake events", () => {
     }
   });
 
+  it("writes event-specific inbox summaries for wake adapters", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-summary-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const entry = (id: string, summary: string) => ({
+        id,
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary,
+        actionHint: "reply when ready",
+        read: false,
+        payload: { text: summary }
+      });
+
+      const first = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-summary-1", "first wake summary")
+      });
+      const second = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-summary-2", "second wake summary")
+      });
+
+      expect(first.inboxSummaryPath).not.toBe(second.inboxSummaryPath);
+      await expect(readFile(first.inboxSummaryPath, "utf8")).resolves.toContain("first wake summary");
+      await expect(readFile(first.inboxSummaryPath, "utf8")).resolves.not.toContain("second wake summary");
+      await expect(readFile(second.inboxSummaryPath, "utf8")).resolves.toContain("second wake summary");
+      await expect(readFile(path.join(dataDir, "wake", "inbox-summary.txt"), "utf8")).resolves.toContain("second wake summary");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("drains matching wake events when inbox entries are marked read through the CLI", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-inbox-read-"));
     try {
