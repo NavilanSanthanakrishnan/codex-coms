@@ -83,7 +83,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 
 ## Packaging
 
-`npm pack` and `npm publish` run `npm run build` through the `prepack` script, so package artifacts are generated from the current source before npm assembles the tarball. The build also marks `dist/src/cli.js` executable for local `npm link` and direct bin usage.
+`npm pack` and `npm publish` run `npm run build` through the `prepack` script, so runtime package artifacts are generated from the current source before npm assembles the tarball. The build emits only `dist/src` and marks `dist/src/cli.js` executable for local `npm link` and direct bin usage. `npm run typecheck` still checks source, tests, and config without emitting files.
 
 ## CLI Commands
 
@@ -136,11 +136,12 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 ### Root Files
 
 - `package.json`: npm package metadata, CLI bin mapping, runtime dependencies, and scripts.
-  - `build`: compiles TypeScript and marks the generated CLI executable.
+  - `build`: compiles runtime TypeScript into `dist/src` and marks the generated CLI executable.
   - `prepack`: builds `dist/src` before npm packs or publishes the package.
 - `package-lock.json`: npm dependency lockfile.
 - `scripts/mark-cli-executable.mjs`: restores executable permissions on the generated CLI after TypeScript emits it.
-- `tsconfig.json`: TypeScript compiler settings for ESM Node output.
+- `tsconfig.json`: repo-wide TypeScript settings used by `npm run typecheck` for source, tests, and config.
+- `tsconfig.build.json`: build-only TypeScript config that emits runtime `src` files without test or Vitest config artifacts.
 - `vitest.config.ts`: Vitest test discovery and timeout settings.
 - `.gitignore`: excludes dependencies, build output, coverage, logs, and local `.codex-coms` state.
 - `AGENTS.md`: repository guidance for Codex.
