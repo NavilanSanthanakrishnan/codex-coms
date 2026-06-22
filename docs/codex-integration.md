@@ -12,7 +12,7 @@ The repo includes `.agents/skills/codex-coms/SKILL.md`. Codex can load repo-scop
 4. Codex runs `codex-coms status --peers` when it needs to know whether the peer sidecar is online.
 5. Codex runs `codex-coms inbox`.
 6. Codex summarizes unread messages.
-7. Codex sends small replies, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
+7. Codex sends small replies with `codex-coms send --wait-ms 10000`, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
 
 For ongoing collaboration, keep the sidecar online:
 
@@ -23,6 +23,14 @@ codex-coms connect --daemon --workspace "$PWD"
 Run this after `codex-coms init` so saved config supplies relay, room, agent ID, and token. This avoids repeating the token in long-lived process arguments.
 
 Daemon mode retries relay connection failures, so transient tunnel or network drops should become local sidecar log entries instead of silent collaboration outages.
+
+For peer replies, prefer a bounded sender wait:
+
+```bash
+codex-coms send --to shreyagent --text "Short status update." --wait-ms 10000
+```
+
+The relay still does not queue offline messages, but this avoids failing immediately while the target sidecar is starting or reconnecting.
 
 ## Why Not MCP First
 

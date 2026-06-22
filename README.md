@@ -55,7 +55,7 @@ npx /path/to/codex-coms connect --relay ws://HOST_OR_LAN_IP:8787 --room pair --a
 Alice sends Bob a message:
 
 ```bash
-codex-coms send --to bob --text "Can you grant notes/context.md?"
+codex-coms send --to bob --text "Can you grant notes/context.md?" --wait-ms 10000
 ```
 
 Bob checks and grants a narrow path:
