@@ -29,7 +29,7 @@ Codex or human
 
 Direct CLI commands such as `send`, `request-read`, `list-remote`, `read-remote`, and `send-file` open short-lived authenticated WebSocket connections. Long-running `connect` starts the sidecar that receives inbound messages and serves grants.
 
-`connect` writes `.codex-coms/sidecar.pid` and refuses to start a duplicate sidecar unless `--replace` is passed. `status` compares config identity, runtime sidecar identity, and PID liveness so identity drift is visible.
+`connect` writes `.codex-coms/sidecar.pid` and refuses to start a duplicate sidecar unless `--replace` is passed. `status` compares config identity, runtime sidecar identity, and PID liveness so identity drift is visible. When `status --peers` can reach the relay, it also reports whether the relay currently sees the local sidecar and warns if that disagrees with the local runtime status file.
 
 After `init` has saved relay, room, agent ID, and token, `connect --daemon` can start the sidecar in the background from saved config. The daemon child does not need the token repeated in process arguments; output is written to `.codex-coms/sidecar.log` by default and `disconnect` stops the recorded PID.
 
