@@ -81,6 +81,10 @@ npm run demo
 
 The demo starts a relay, creates Alice and Bob temp workspaces, sends a message, creates a grant, reads a granted file, proves `../secret.txt` is denied, transfers a file, and verifies audit logs exist.
 
+## Packaging
+
+`npm pack` and `npm publish` run `npm run build` through the `prepack` script, so package artifacts are generated from the current source before npm assembles the tarball. The build also marks `dist/src/cli.js` executable for local `npm link` and direct bin usage.
+
 ## CLI Commands
 
 - `codex-coms relay --host 127.0.0.1 --port 8787 --token <token>` starts the relay.
@@ -132,7 +136,10 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 ### Root Files
 
 - `package.json`: npm package metadata, CLI bin mapping, runtime dependencies, and scripts.
+  - `build`: compiles TypeScript and marks the generated CLI executable.
+  - `prepack`: builds `dist/src` before npm packs or publishes the package.
 - `package-lock.json`: npm dependency lockfile.
+- `scripts/mark-cli-executable.mjs`: restores executable permissions on the generated CLI after TypeScript emits it.
 - `tsconfig.json`: TypeScript compiler settings for ESM Node output.
 - `vitest.config.ts`: Vitest test discovery and timeout settings.
 - `.gitignore`: excludes dependencies, build output, coverage, logs, and local `.codex-coms` state.
