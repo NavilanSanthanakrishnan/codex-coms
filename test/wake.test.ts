@@ -243,6 +243,108 @@ describe("wake events", () => {
     }
   });
 
+  it("retries an attempted pending wake event only when requested", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-trigger-retry-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const marker = path.join(root, "retry-marker.txt");
+      const script = path.join(root, "wake-retry-script.mjs");
+      await writeFile(script, [
+        "import { appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "await appendFile(marker, `${process.env.CODEX_COMS_WAKE_EVENT_ID}\\n`);"
+      ].join("\n"), "utf8");
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-retry-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "wake trigger retry should be explicit",
+          actionHint: "Retry after fixing local adapter.",
+          read: false,
+          payload: { text: "wake trigger retry should be explicit" }
+        }
+      });
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "command",
+        process.execPath,
+        script,
+        marker
+      ], { cwd: process.cwd() });
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--json"
+      ], { cwd: process.cwd() });
+      await waitFor(async () => {
+        const content = await readFile(marker, "utf8").catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        });
+        return content?.split("\n").filter(Boolean).length === 1 ? content : undefined;
+      });
+
+      const { stdout: blockedRetryJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--json"
+      ], { cwd: process.cwd() });
+      const blockedRetry = JSON.parse(blockedRetryJson) as Record<string, unknown>;
+      expect(blockedRetry.reason).toBe("already_attempted");
+      expect(blockedRetry.commandStarted).toBe(false);
+
+      const { stdout: retryJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--retry-attempted",
+        "--json"
+      ], { cwd: process.cwd() });
+      const retry = JSON.parse(retryJson) as Record<string, unknown>;
+      expect(retry.reason).toBe("started");
+      expect(retry.commandStarted).toBe(true);
+      expect(retry.retriedAttempted).toBe(true);
+
+      const finalMarker = await waitFor(async () => {
+        const content = await readFile(marker, "utf8");
+        return content.split("\n").filter(Boolean).length === 2 ? content : undefined;
+      });
+      expect(finalMarker.split("\n").filter(Boolean)).toEqual([
+        "wake_message-retry-1",
+        "wake_message-retry-1"
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports pending wake command events in wake and main status", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-status-"));
     try {

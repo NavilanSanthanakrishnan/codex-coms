@@ -61,6 +61,7 @@ export interface WakeTriggerResult {
   event?: WakeEvent;
   commandStarted: boolean;
   reason: WakeTriggerReason;
+  retriedAttempted?: boolean;
 }
 
 export interface WakeCommandStatus {
@@ -75,6 +76,10 @@ export interface WakeWaitOptions {
   limit?: number;
   timeoutMs?: number;
   pollMs?: number;
+}
+
+export interface WakeTriggerOptions {
+  retryAttempted?: boolean;
 }
 
 const MAX_DRAINED_IDS = 5000;
@@ -643,7 +648,7 @@ export async function maybeWakeCodex(dataDir: string, localAgentId: string, conf
   }
 }
 
-export async function triggerPendingWakeCommand(dataDir: string, localAgentId: string, config: WakeConfig | undefined): Promise<WakeTriggerResult> {
+export async function triggerPendingWakeCommand(dataDir: string, localAgentId: string, config: WakeConfig | undefined, options: WakeTriggerOptions = {}): Promise<WakeTriggerResult> {
   if (!config?.enabled || !config.command?.length) {
     return { commandStarted: false, reason: "not_configured" };
   }
@@ -655,7 +660,12 @@ export async function triggerPendingWakeCommand(dataDir: string, localAgentId: s
     return { commandStarted: false, reason: "no_pending" };
   }
   const attempted = new Set(commandState.attemptedIds);
-  const event = events.find((item) => !attempted.has(item.id));
+  let retriedAttempted = false;
+  let event = events.find((item) => !attempted.has(item.id));
+  if (!event && options.retryAttempted) {
+    event = events.find((item) => attempted.has(item.id));
+    retriedAttempted = Boolean(event);
+  }
   if (!event) {
     return { commandStarted: false, reason: "already_attempted" };
   }
@@ -666,7 +676,8 @@ export async function triggerPendingWakeCommand(dataDir: string, localAgentId: s
   return {
     event,
     commandStarted,
-    reason: commandStarted ? "started" : "not_started"
+    reason: commandStarted ? "started" : "not_started",
+    retriedAttempted
   };
 }
 
