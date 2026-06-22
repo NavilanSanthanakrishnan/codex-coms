@@ -48,6 +48,18 @@ async function loadCliConfig(options: Record<string, unknown>): Promise<CodexCom
   return loadConfig(workspace, dataDir);
 }
 
+function positiveIntegerOption(value: unknown, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function resolveConnectConfig(options: Record<string, unknown>): Promise<CodexComsConfig> {
   const workspace = workspaceFromOptions(options);
   const dataDir = dataDirFromOptions(workspace, options);
@@ -82,6 +94,7 @@ async function resolveConnectConfig(options: Record<string, unknown>): Promise<C
 async function startDaemonSidecar(config: CodexComsConfig, options: Record<string, unknown>): Promise<void> {
   await ensureNoDuplicateSidecar(config.dataDir, Boolean(options.replace));
   const logPath = path.resolve(config.dataDir, typeof options.log === "string" ? options.log : "sidecar.log");
+  const retryDelayMs = positiveIntegerOption(options.retryDelayMs ?? 1000, "--retry-delay-ms");
   await mkdir(path.dirname(logPath), { recursive: true });
   const log = await open(logPath, "a");
   try {
@@ -92,7 +105,10 @@ async function startDaemonSidecar(config: CodexComsConfig, options: Record<strin
       "--workspace",
       config.workspace,
       "--data-dir",
-      config.dataDir
+      config.dataDir,
+      "--retry",
+      "--retry-delay-ms",
+      String(retryDelayMs)
     ], {
       detached: true,
       stdio: ["ignore", log.fd, log.fd]
@@ -107,6 +123,57 @@ async function startDaemonSidecar(config: CodexComsConfig, options: Record<strin
   } finally {
     await log.close();
   }
+}
+
+async function runSidecar(config: CodexComsConfig, options: { retry: boolean; retryDelayMs: number }): Promise<void> {
+  let sidecar: PeerSidecar | undefined;
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) {
+      return;
+    }
+    stopping = true;
+    try {
+      await sidecar?.stop();
+    } finally {
+      await clearSidecarPid(config.dataDir);
+    }
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  do {
+    sidecar = new PeerSidecar(config);
+    let connected = false;
+    try {
+      await sidecar.start();
+      connected = true;
+      await writeSidecarPid(config.dataDir);
+      console.log(`connected ${config.agentId} to ${config.relay} room=${config.room}`);
+      await sidecar.waitForClose();
+      if (options.retry && !stopping) {
+        console.error(`sidecar disconnected; retrying in ${options.retryDelayMs}ms`);
+      }
+    } catch (error) {
+      await appendAudit(config.dataDir, {
+        event: "sidecar_connect_failed",
+        actor: config.agentId,
+        result: "error",
+        details: { relay: config.relay, room: config.room, reason: (error as Error).message }
+      });
+      if (!options.retry || stopping) {
+        throw error;
+      }
+      console.error(`sidecar connection failed: ${(error as Error).message}; retrying in ${options.retryDelayMs}ms`);
+    } finally {
+      sidecar = undefined;
+      if ((!options.retry || stopping) && connected) {
+        await clearSidecarPid(config.dataDir);
+      }
+    }
+    if (options.retry && !stopping) {
+      await sleep(options.retryDelayMs);
+    }
+  } while (options.retry && !stopping);
 }
 
 program.command("relay")
@@ -162,6 +229,8 @@ program.command("connect")
   .option("--replace", "stop an existing sidecar for this workspace before connecting")
   .option("--daemon", "start the sidecar in the background using saved config")
   .option("--log <path>", "daemon log path, defaults to .codex-coms/sidecar.log")
+  .option("--retry", "keep reconnecting after disconnects or connection failures")
+  .option("--retry-delay-ms <ms>", "delay between retry attempts", "1000")
   .action(async (options) => {
     const config = await resolveConnectConfig(options);
     if (options.daemon) {
@@ -169,26 +238,10 @@ program.command("connect")
       return;
     }
     await ensureNoDuplicateSidecar(config.dataDir, Boolean(options.replace));
-    const sidecar = new PeerSidecar(config);
-    let stopping = false;
-    const stop = async () => {
-      if (stopping) {
-        return;
-      }
-      stopping = true;
-      try {
-        await sidecar.stop();
-      } finally {
-        await clearSidecarPid(config.dataDir);
-      }
-    };
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    await sidecar.start();
-    await writeSidecarPid(config.dataDir);
-    console.log(`connected ${config.agentId} to ${config.relay} room=${config.room}`);
-    await sidecar.waitForClose();
-    await clearSidecarPid(config.dataDir);
+    await runSidecar(config, {
+      retry: Boolean(options.retry),
+      retryDelayMs: positiveIntegerOption(options.retryDelayMs, "--retry-delay-ms")
+    });
   });
 
 program.command("disconnect")

@@ -33,6 +33,8 @@ Direct CLI commands such as `send`, `request-read`, `list-remote`, `read-remote`
 
 After `init` has saved relay, room, agent ID, and token, `connect --daemon` can start the sidecar in the background from saved config. The daemon child does not need the token repeated in process arguments; output is written to `.codex-coms/sidecar.log` by default and `disconnect` stops the recorded PID.
 
+Daemon sidecars retry connection failures and relay disconnects by default so tunnel restarts and short network drops do not require the agent to manually restart `connect`. Foreground sidecars can opt into the same behavior with `connect --retry`.
+
 ## State Files
 
 `codex-coms init` creates `.codex-coms/` in the workspace:
