@@ -81,16 +81,28 @@ function wakeCommandLockPath(dataDir: string): string {
   return path.join(dataDir, "wake-command.lock");
 }
 
+function safeEventBasename(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
 function safeEventFilename(id: string): string {
-  return `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`;
+  return `${safeEventBasename(id)}.json`;
 }
 
 function eventPathFor(dataDir: string, id: string): string {
   return path.join(wakeRoot(dataDir), "events", safeEventFilename(id));
 }
 
+function inboxSummaryPathFor(dataDir: string, id: string): string {
+  return path.join(wakeRoot(dataDir), "summaries", `${safeEventBasename(id)}.txt`);
+}
+
 function latestEventPath(dataDir: string): string {
   return path.join(wakeRoot(dataDir), "latest.json");
+}
+
+function latestInboxSummaryPath(dataDir: string): string {
+  return path.join(wakeRoot(dataDir), "inbox-summary.txt");
 }
 
 function priorityFor(entry: InboxEntry): WakePriority {
@@ -568,7 +580,8 @@ export async function dispatchWakeEvent(input: {
 }
 
 export async function writeInboxSummary(dataDir: string, event: WakeEvent): Promise<string> {
-  const file = path.join(wakeRoot(dataDir), "inbox-summary.txt");
+  const file = inboxSummaryPathFor(dataDir, event.id);
+  const latest = latestInboxSummaryPath(dataDir);
   const summary = [
     "codex-coms received an unread peer event.",
     `wakeEvent: ${event.id}`,
@@ -582,5 +595,6 @@ export async function writeInboxSummary(dataDir: string, event: WakeEvent): Prom
   ].join("\n");
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${summary}\n`, "utf8");
+  await writeFile(latest, `${summary}\n`, "utf8");
   return file;
 }
