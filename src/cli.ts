@@ -68,6 +68,30 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForPeerSidecar(config: CodexComsConfig, peerAgentId: string, timeoutMs: number): Promise<void> {
+  const started = Date.now();
+  let lastError: string | undefined;
+  while (Date.now() - started <= timeoutMs) {
+    try {
+      const peers = await requestRoomPeers(config);
+      const peer = peers.find((item) => item.agentId === peerAgentId);
+      if (peer && peer.sockets > 0 && peer.kinds.includes("sidecar")) {
+        return;
+      }
+      lastError = undefined;
+    } catch (error) {
+      lastError = (error as Error).message;
+    }
+    const remaining = timeoutMs - (Date.now() - started);
+    if (remaining <= 0) {
+      break;
+    }
+    await sleep(Math.min(250, remaining));
+  }
+  const detail = lastError ? `; last peer check failed: ${lastError}` : "";
+  throw new Error(`peer ${peerAgentId} did not appear with a sidecar within ${timeoutMs}ms${detail}`);
+}
+
 async function resolveConnectConfig(options: Record<string, unknown>): Promise<CodexComsConfig> {
   const workspace = workspaceFromOptions(options);
   const dataDir = dataDirFromOptions(workspace, options);
@@ -295,9 +319,14 @@ program.command("send")
   .description("send a message to a peer agent")
   .requiredOption("--to <agentId>", "target agent id")
   .requiredOption("--text <message>", "message text")
+  .option("--wait-ms <ms>", "wait up to this many milliseconds for the target sidecar before sending", "0")
   .action(async (options) => {
     validateAgentId(options.to);
     const config = await loadCliConfig(options);
+    const waitMs = nonNegativeIntegerOption(options.waitMs, "--wait-ms");
+    if (waitMs > 0) {
+      await waitForPeerSidecar(config, options.to, waitMs);
+    }
     const message = await sendAgentMessage(config, options.to, options.text);
     console.log(`sent ${message.id} to ${options.to}`);
   });
