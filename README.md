@@ -111,7 +111,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms wake queue` shows pending local wake events.
 - `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper.
 - `codex-coms wake wait --json` blocks until local wake events are available, then claims them for a local adapter.
-- `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default.
+- `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned. Pass `--allow-concurrent` when one process per event is intentional.
 - `codex-coms wake disable` disables wake behavior.
 - `codex-coms demo` runs the local simulation.
 
