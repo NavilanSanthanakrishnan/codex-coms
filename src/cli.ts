@@ -17,7 +17,7 @@ import {
 } from "./config.js";
 import { runDemo } from "./demo/runDemo.js";
 import { PeerSidecar, parseListResponse, parseReadResponse, requestProtocolResponse, requestRoomPeers, sendAgentMessage, sendFileToPeer, sendProtocolMessage } from "./peer/client.js";
-import { formatInbox, markInboxRead, readInboxEntries } from "./peer/inbox.js";
+import { formatInbox, formatOutbox, markInboxRead, readInboxEntries, readOutboxEntries } from "./peer/inbox.js";
 import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSidecarPid, writeSidecarPid } from "./peer/pid.js";
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
@@ -327,6 +327,21 @@ program.command("inbox")
     }
   });
 
+program.command("outbox")
+  .description("print outbound message records")
+  .option("--json", "print JSON")
+  .option("--failed", "show only failed sends")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const entries = await readOutboxEntries(config.dataDir);
+    const displayed = options.failed ? entries.filter((entry) => !entry.delivered) : entries;
+    if (options.json) {
+      console.log(JSON.stringify(displayed, null, 2));
+    } else {
+      console.log(formatOutbox(displayed));
+    }
+  });
+
 program.command("grant")
   .description("grant read-only access to a local file or directory")
   .requiredOption("--to <agentId>", "target agent id")
@@ -514,6 +529,7 @@ program.command("status")
   .action(async (options) => {
     const config = await loadCliConfig(options);
     const inbox = await readInboxEntries(config.dataDir);
+    const outbox = await readOutboxEntries(config.dataDir);
     const grants = await loadGrants(config.dataDir);
     const runtime = await loadRuntimeStatus(config.dataDir);
     const pendingWakeEvents = await readPendingWakeEvents(config.dataDir);
@@ -527,6 +543,8 @@ program.command("status")
     if (runtime.connected && !sidecarPidRunning) {
       warnings.push("status file says connected, but no recorded sidecar pid is running");
     }
+    const failedOutbox = outbox.filter((entry) => !entry.delivered);
+    const lastFailedSend = failedOutbox.at(-1);
     let peers: Array<{ agentId: string; sockets: number; kinds: string[] }> | undefined;
     if (options.peers) {
       try {
@@ -546,6 +564,8 @@ program.command("status")
       sidecarPid,
       sidecarPidRunning,
       inboxCount: inbox.filter((entry) => !entry.read).length,
+      outboxFailedCount: failedOutbox.length,
+      lastFailedSend,
       pendingWakeEvents: pendingWakeEvents.length,
       activeGrants: activeGrants.length,
       transferFolder: path.join(config.dataDir, "transfers"),
@@ -571,6 +591,10 @@ program.command("status")
         console.log(`sidecar agent: ${status.sidecarAgentId}`);
       }
       console.log(`unread inbox: ${status.inboxCount}`);
+      console.log(`failed outbox: ${status.outboxFailedCount}`);
+      if (status.lastFailedSend) {
+        console.log(`last failed send: ${status.lastFailedSend.timestamp} to ${status.lastFailedSend.to} (${status.lastFailedSend.error ?? "unknown error"})`);
+      }
       console.log(`pending wake events: ${status.pendingWakeEvents}`);
       console.log(`active grants: ${status.activeGrants}`);
       console.log(`transfers: ${status.transferFolder}`);

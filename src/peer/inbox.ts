@@ -13,6 +13,16 @@ export interface InboxEntry {
   payload: Record<string, unknown>;
 }
 
+export interface OutboxEntry {
+  id: string;
+  timestamp: string;
+  to: string;
+  type: string;
+  summary: string;
+  delivered: boolean;
+  error?: string;
+}
+
 const INBOX_LOCK_STALE_MS = 5_000;
 const INBOX_LOCK_TIMEOUT_MESSAGE = "timed out waiting for inbox lock";
 
@@ -90,9 +100,22 @@ export async function appendInboxEntry(dataDir: string, entry: InboxEntry, optio
   }, options);
 }
 
-export async function appendOutboxEntry(dataDir: string, entry: Record<string, unknown>): Promise<void> {
+export async function appendOutboxEntry(dataDir: string, entry: Omit<OutboxEntry, "timestamp">): Promise<void> {
   await mkdir(dataDir, { recursive: true });
   await appendFile(path.join(dataDir, "outbox.jsonl"), `${JSON.stringify({ ...entry, timestamp: new Date().toISOString() })}\n`, "utf8");
+}
+
+export async function readOutboxEntries(dataDir: string): Promise<OutboxEntry[]> {
+  const file = path.join(dataDir, "outbox.jsonl");
+  try {
+    const content = await readFile(file, "utf8");
+    return content.split("\n").filter(Boolean).map((line) => JSON.parse(line) as OutboxEntry);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function readInboxEntries(dataDir: string): Promise<InboxEntry[]> {
@@ -133,5 +156,16 @@ export function formatInbox(entries: InboxEntry[]): string {
     const state = entry.read ? "read" : "unread";
     const hint = entry.actionHint ? `\n  action: ${entry.actionHint}` : "";
     return `- [${state}] ${entry.timestamp} from ${entry.from} (${entry.type})\n  ${entry.summary}${hint}\n  id: ${entry.id}`;
+  }).join("\n");
+}
+
+export function formatOutbox(entries: OutboxEntry[]): string {
+  if (entries.length === 0) {
+    return "Outbox is empty.";
+  }
+  return entries.map((entry) => {
+    const state = entry.delivered ? "delivered" : "failed";
+    const error = entry.error ? `\n  error: ${entry.error}` : "";
+    return `- [${state}] ${entry.timestamp} to ${entry.to} (${entry.type})\n  ${entry.summary}${error}\n  id: ${entry.id}`;
   }).join("\n");
 }
