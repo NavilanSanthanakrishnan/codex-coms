@@ -92,6 +92,80 @@ describe("CLI", () => {
     }
   });
 
+  it("waits for the target sidecar before requesting read access when requested", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-cli-wait-request-"));
+    const relay = new RelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "test-token"
+    });
+    const started = await relay.start();
+    let bobSidecar: PeerSidecar | undefined;
+    let startError: unknown;
+    let startTimer: NodeJS.Timeout | undefined;
+    try {
+      const aliceWorkspace = path.join(root, "alice");
+      const bobWorkspace = path.join(root, "bob");
+      await mkdir(aliceWorkspace, { recursive: true });
+      await mkdir(bobWorkspace, { recursive: true });
+      await initWorkspace({
+        agentId: "alice",
+        workspace: aliceWorkspace,
+        relay: started.url,
+        room: "pair",
+        token: "test-token"
+      });
+      const bobConfig = await initWorkspace({
+        agentId: "bob",
+        workspace: bobWorkspace,
+        relay: started.url,
+        room: "pair",
+        token: "test-token"
+      });
+
+      startTimer = setTimeout(() => {
+        bobSidecar = new PeerSidecar(bobConfig);
+        bobSidecar.start().catch((error) => {
+          startError = error;
+        });
+      }, 100);
+
+      const { stdout } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "request-read",
+        "--workspace",
+        aliceWorkspace,
+        "--to",
+        "bob",
+        "--path",
+        "notes/context.md",
+        "--reason",
+        "Need shared context",
+        "--wait-ms",
+        "2000"
+      ], { cwd: process.cwd() });
+
+      if (startError) {
+        throw startError;
+      }
+      expect(stdout).toContain("requested read access from bob");
+      const inbox = await readInboxEntries(bobConfig.dataDir);
+      expect(inbox).toHaveLength(1);
+      expect(inbox[0]).toEqual(expect.objectContaining({
+        from: "alice",
+        type: "workspace.grant.request",
+        summary: expect.stringContaining("notes/context.md")
+      }));
+    } finally {
+      if (startTimer) {
+        clearTimeout(startTimer);
+      }
+      await bobSidecar?.stop().catch(() => undefined);
+      await relay.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("shows failed outbox records and status summary", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-cli-outbox-"));
     try {
