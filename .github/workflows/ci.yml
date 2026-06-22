@@ -43,8 +43,16 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Seed stale build output
+        run: |
+          mkdir -p dist/test
+          echo stale > dist/test/stale.js
+
       - name: Build
         run: npm run build
+
+      - name: Check build output scope
+        run: test ! -e dist/test/stale.js
 
       - name: Check CLI executable
         run: test -x dist/src/cli.js

@@ -17,7 +17,7 @@
     ".agents/skills/codex-coms"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json && node scripts/mark-cli-executable.mjs",
     "dev": "tsx src/cli.ts",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
