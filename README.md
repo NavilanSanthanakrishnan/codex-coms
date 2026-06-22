@@ -87,6 +87,9 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms status` shows local state.
 - `codex-coms status --peers` asks the relay which agents are connected in the room.
 - `codex-coms wake notify` enables a local macOS notification for inbound inbox events.
+- `codex-coms wake queue` shows pending local wake events.
+- `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper.
+- `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default.
 - `codex-coms wake disable` disables wake behavior.
 - `codex-coms demo` runs the local simulation.
 
@@ -219,7 +222,10 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `appendAudit`: appends a redacted JSONL audit event.
   - `readAuditLog`: reads audit events.
 - `src/wake/codexWake.ts`: optional wake helper.
-  - `maybeWakeCodex`: no-ops by default or runs a locally configured static command.
+  - `dispatchWakeEvent`: records a durable local wake event and optionally invokes a configured local command.
+  - `readPendingWakeEvents`: returns wake events not yet claimed by a local thread or automation.
+  - `markWakeEventsDrained`: marks wake events as claimed.
+  - `maybeWakeCodex`: no-ops by default or runs a locally configured static command with local event paths and metadata.
   - `writeInboxSummary`: writes a local summary file for wake commands to inspect.
 - `src/demo/runDemo.ts`: end-to-end local simulation.
   - `runDemo`: starts relay and sidecars, sends a message, grants access, reads remotely, verifies denial, transfers a file, and returns a structured result.
@@ -229,4 +235,5 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
 - `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
+- `test/wake.test.ts`: verifies sidecar wake-event queueing and locally configured wake command metadata.
 - `test/demo.test.ts`: runs `runDemo` and verifies message delivery, remote read success, outside-read denial, file transfer, and audit log output.

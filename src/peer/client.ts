@@ -24,7 +24,7 @@ import type { InboxEntry } from "./inbox.js";
 import { FileTransferReceiver, prepareFileTransfer } from "../transfer/fileTransfer.js";
 import { findUsableGrant } from "../workspace/grants.js";
 import { FsAccessError, listGrantedPath, readGrantedFile } from "../workspace/fsAccess.js";
-import { maybeWakeCodex, writeInboxSummary } from "../wake/codexWake.js";
+import { dispatchWakeEvent } from "../wake/codexWake.js";
 
 export interface ProtocolConnectionOptions {
   relay: string;
@@ -398,11 +398,22 @@ export class PeerSidecar {
 
   private async appendInboxAndWake(entry: InboxEntry): Promise<void> {
     await appendInboxEntry(this.config.dataDir, entry);
-    if (this.config.wake?.enabled) {
-      const inboxSummaryPath = await writeInboxSummary(this.config.dataDir, entry);
-      await maybeWakeCodex(this.config.dataDir, this.config.agentId, {
-        ...this.config.wake,
-        inboxSummaryPath
+    try {
+      await dispatchWakeEvent({
+        dataDir: this.config.dataDir,
+        workspace: this.config.workspace,
+        localAgentId: this.config.agentId,
+        entry,
+        config: this.config.wake
+      });
+    } catch (error) {
+      await appendAudit(this.config.dataDir, {
+        event: "wake_failed",
+        actor: this.config.agentId,
+        peer: entry.from,
+        messageId: entry.id,
+        result: "error",
+        details: { reason: (error as Error).message }
       });
     }
   }

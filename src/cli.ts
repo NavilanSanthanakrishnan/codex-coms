@@ -20,6 +20,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
+import { drainPendingWakeEvents, formatWakeEvents, readPendingWakeEvents, readWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -405,6 +406,7 @@ program.command("status")
     const inbox = await readInboxEntries(config.dataDir);
     const grants = await loadGrants(config.dataDir);
     const runtime = await loadRuntimeStatus(config.dataDir);
+    const pendingWakeEvents = await readPendingWakeEvents(config.dataDir);
     const activeGrants = grants.filter((grant) => isGrantActive(grant));
     const sidecarPid = await readSidecarPid(config.dataDir);
     const sidecarPidRunning = sidecarPid ? isProcessRunning(sidecarPid) : false;
@@ -434,6 +436,7 @@ program.command("status")
       sidecarPid,
       sidecarPidRunning,
       inboxCount: inbox.filter((entry) => !entry.read).length,
+      pendingWakeEvents: pendingWakeEvents.length,
       activeGrants: activeGrants.length,
       transferFolder: path.join(config.dataDir, "transfers"),
       auditLogPath: path.join(config.dataDir, "audit.jsonl"),
@@ -458,6 +461,7 @@ program.command("status")
         console.log(`sidecar agent: ${status.sidecarAgentId}`);
       }
       console.log(`unread inbox: ${status.inboxCount}`);
+      console.log(`pending wake events: ${status.pendingWakeEvents}`);
       console.log(`active grants: ${status.activeGrants}`);
       console.log(`transfers: ${status.transferFolder}`);
       console.log(`audit: ${status.auditLogPath}`);
@@ -482,7 +486,44 @@ wake.command("status")
   .description("show wake configuration")
   .action(async (options) => {
     const config = await loadCliConfig(options);
-    console.log(JSON.stringify(config.wake ?? { enabled: false }, null, 2));
+    const pending = await readPendingWakeEvents(config.dataDir);
+    console.log(JSON.stringify({
+      ...(config.wake ?? { enabled: false }),
+      pendingWakeEvents: pending.length
+    }, null, 2));
+  });
+
+wake.command("queue")
+  .description("show pending local wake events without marking them handled")
+  .option("--json", "print JSON")
+  .option("--all", "include already drained wake events")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const events = options.all ? await readWakeEvents(config.dataDir) : await readPendingWakeEvents(config.dataDir);
+    if (options.json) {
+      console.log(JSON.stringify(events, null, 2));
+    } else {
+      console.log(formatWakeEvents(events));
+    }
+  });
+
+wake.command("drain")
+  .description("claim pending wake events for a local thread or automation")
+  .option("--json", "print JSON")
+  .option("--limit <count>", "maximum events to drain", "20")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const limit = Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error("--limit must be a positive integer");
+    }
+    const events = await drainPendingWakeEvents(config.dataDir, limit);
+    if (options.json) {
+      console.log(JSON.stringify(events, null, 2));
+    } else {
+      console.log(formatWakeEvents(events));
+      console.log(`Drained ${events.length} wake event(s).`);
+    }
   });
 
 wake.command("disable")
@@ -502,6 +543,7 @@ wake.command("notify")
     await updateConfig(config, {
       wake: {
         enabled: true,
+        appendEventPath: false,
         command: [
           "/usr/bin/osascript",
           "-e",
@@ -517,6 +559,7 @@ wake.command("command")
   .argument("<command>", "absolute command path")
   .argument("[args...]", "static command args")
   .option("--prompt <text>", "static prompt argument appended after static args")
+  .option("--no-event-path", "do not append the local wake event JSON path as the final argument")
   .action(async (command, args: string[], options) => {
     const config = await loadCliConfig(options);
     if (!path.isAbsolute(command)) {
@@ -526,7 +569,8 @@ wake.command("command")
       wake: {
         enabled: true,
         command: [command, ...args],
-        staticPrompt: options.prompt
+        staticPrompt: options.prompt,
+        appendEventPath: options.eventPath
       }
     });
     console.log(`wake enabled with command ${command}`);
