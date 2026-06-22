@@ -42,7 +42,7 @@ codex-coms inbox
 codex-coms inbox --mark-read
 ```
 
-`codex-coms status` also reports how many pending wake events have not yet attempted the configured wake command, so a local adapter can decide whether `codex-coms wake trigger --json` has useful work.
+`codex-coms status` also reports how many pending wake events have not yet attempted the configured wake command, plus whether a wake command lock is live or stale, so a local adapter can decide whether `codex-coms wake trigger --json` has useful work.
 
 When the manual flow marks displayed messages read, codex-coms also drains the matching pending wake events so already-handled messages do not keep appearing as local wake work.
 

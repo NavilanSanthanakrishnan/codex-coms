@@ -573,6 +573,9 @@ program.command("status")
       attemptedWakeCommandEvents: wakeCommandStatus.attemptedWakeCommandEvents,
       wakeCommandRunning: wakeCommandStatus.wakeCommandRunning,
       wakeCommandPid: wakeCommandStatus.wakeCommandPid,
+      wakeCommandLockPresent: wakeCommandStatus.wakeCommandLockPresent,
+      wakeCommandLockStale: wakeCommandStatus.wakeCommandLockStale,
+      wakeCommandLockAgeMs: wakeCommandStatus.wakeCommandLockAgeMs,
       activeGrants: activeGrants.length,
       transferFolder: path.join(config.dataDir, "transfers"),
       auditLogPath: path.join(config.dataDir, "audit.jsonl"),
@@ -610,6 +613,7 @@ program.command("status")
       console.log(`pending wake events: ${status.pendingWakeEvents}`);
       console.log(`pending wake command events: ${status.pendingWakeCommandEvents}`);
       console.log(`wake command running: ${status.wakeCommandRunning}${status.wakeCommandPid ? ` pid ${status.wakeCommandPid}` : ""}`);
+      console.log(`wake command lock: ${status.wakeCommandLockPresent ? (status.wakeCommandLockStale ? "stale" : "present") : "none"}`);
       console.log(`active grants: ${status.activeGrants}`);
       console.log(`transfers: ${status.transferFolder}`);
       console.log(`audit: ${status.auditLogPath}`);

@@ -442,6 +442,63 @@ describe("wake events", () => {
     }
   });
 
+  it("reports stale wake command locks without removing them", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-stale-status-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const lockPath = path.join(config.dataDir, "wake-command.lock");
+      await mkdir(lockPath, { recursive: true });
+      await writeFile(path.join(lockPath, "pid"), "99999999\n", "utf8");
+      const staleTime = new Date(Date.now() - 10_000);
+      await utimes(lockPath, staleTime, staleTime);
+
+      const { stdout: wakeStatusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "status"
+      ], { cwd: process.cwd() });
+      const wakeStatus = JSON.parse(wakeStatusJson) as Record<string, unknown>;
+      expect(wakeStatus.wakeCommandLockPresent).toBe(true);
+      expect(wakeStatus.wakeCommandLockStale).toBe(true);
+      expect(wakeStatus.wakeCommandRunning).toBe(false);
+      expect(wakeStatus.wakeCommandPid).toBe(99999999);
+      expect(typeof wakeStatus.wakeCommandLockAgeMs).toBe("number");
+      await expect(readFile(path.join(lockPath, "pid"), "utf8")).resolves.toBe("99999999\n");
+
+      const { stdout: mainStatusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "status",
+        "--json"
+      ], { cwd: process.cwd() });
+      const mainStatus = JSON.parse(mainStatusJson) as Record<string, unknown>;
+      expect(mainStatus.wakeCommandLockPresent).toBe(true);
+      expect(mainStatus.wakeCommandLockStale).toBe(true);
+      expect(mainStatus.wakeCommandRunning).toBe(false);
+
+      const { stdout: mainStatusText } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "status"
+      ], { cwd: process.cwd() });
+      expect(mainStatusText).toContain("wake command lock: stale");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("coalesces wake command starts behind a live handler", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-coalesce-"));
     const release = path.join(root, "release");
