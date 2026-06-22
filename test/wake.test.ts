@@ -691,6 +691,8 @@ describe("wake events", () => {
       expect(initialWakeStatus.pendingWakeCommandEvents).toBe(1);
       expect(initialWakeStatus.attemptedWakeCommandEvents).toBe(0);
       expect(initialWakeStatus.wakeCommandRunning).toBe(false);
+      expect((initialWakeStatus.nextWakeEvent as Record<string, unknown>).id).toBe("wake_message-status-1");
+      expect((initialWakeStatus.nextWakeCommandEvent as Record<string, unknown>).id).toBe("wake_message-status-1");
 
       await execFileAsync(process.execPath, [
         ...cliArgs,
@@ -722,6 +724,8 @@ describe("wake events", () => {
       expect(afterWakeStatus.pendingWakeEvents).toBe(1);
       expect(afterWakeStatus.pendingWakeCommandEvents).toBe(0);
       expect(afterWakeStatus.attemptedWakeCommandEvents).toBe(1);
+      expect((afterWakeStatus.nextWakeEvent as Record<string, unknown>).id).toBe("wake_message-status-1");
+      expect(afterWakeStatus.nextWakeCommandEvent).toBeUndefined();
 
       const { stdout: mainStatusJson } = await execFileAsync(process.execPath, [
         ...cliArgs,
@@ -735,6 +739,17 @@ describe("wake events", () => {
       expect(mainStatus.pendingWakeCommandEvents).toBe(0);
       expect(mainStatus.attemptedWakeCommandEvents).toBe(1);
       expect(mainStatus.wakeCommandRunning).toBe(false);
+      expect((mainStatus.nextWakeEvent as Record<string, unknown>).inboxEntryId).toBe("message-status-1");
+      expect(mainStatus.nextWakeCommandEvent).toBeUndefined();
+
+      const { stdout: mainStatusText } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "status"
+      ], { cwd: process.cwd() });
+      expect(mainStatusText).toContain("next wake event: wake_message-status-1 inbox=message-status-1 from=alice type=agent.message");
+      expect(mainStatusText).not.toContain("next wake command event:");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

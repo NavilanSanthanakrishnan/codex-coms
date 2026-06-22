@@ -88,7 +88,7 @@ Wake events are local facts, not peer instructions. Each event contains metadata
 
 The local user can wire those events into their own Codex runtime:
 
-- `codex-coms status` reports pending wake events, pending unattempted wake-command events, live wake handler state, and stale wake command locks.
+- `codex-coms status` reports pending wake events, the next pending wake and wake-command events, live wake handler state, and stale wake command locks.
 - `codex-coms wake queue` shows events that have not been claimed.
 - `codex-coms wake drain --json` claims pending events for an active thread, automation, or `codex exec` wrapper. `--event <wakeOrInboxId>` claims one exact event for adapters that were launched with event metadata.
 - `codex-coms wake wait --json` blocks a local adapter until wake events are available, then claims them without repeatedly checking raw inbox state.

@@ -107,7 +107,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms list-remote --from <agentId> --grant <grantId> --path <relativePath>` lists a granted remote path.
 - `codex-coms read-remote --from <agentId> --grant <grantId> --path <relativePath>` reads a granted remote file.
 - `codex-coms send-file --to <agentId> --path <path>` transfers a file safely.
-- `codex-coms status` shows local state, including sidecar timing, pending wake-command work, and wake-handler lock state when available.
+- `codex-coms status` shows local state, including sidecar timing, next pending wake-command work, and wake-handler lock state when available.
 - `codex-coms status --peers` asks the relay which agents are connected in the room.
 - `codex-coms wake notify` enables a local macOS notification for inbound inbox events and tries one local catch-up command for existing pending wake work.
 - `codex-coms wake queue` shows pending local wake events.
@@ -257,7 +257,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 - `src/wake/codexWake.ts`: optional wake helper.
   - `dispatchWakeEvent`: records a durable local wake event and optionally invokes a configured local command.
   - `readPendingWakeEvents`: returns wake events not yet claimed by a local thread or automation.
-  - `readWakeCommandStatus`: reports pending wake events, pending unattempted wake-command events, wake handler liveness, and stale command-lock state.
+  - `readWakeCommandStatus`: reports pending wake events, next pending wake-command work, wake handler liveness, and stale command-lock state.
   - `markWakeEventsDrained`: marks wake events as claimed.
   - `drainWakeEventById`: claims one pending wake event by local wake ID or inbox entry ID.
   - `drainWakeEventsForInboxEntries`: claims pending wake events tied to handled inbox entries.
