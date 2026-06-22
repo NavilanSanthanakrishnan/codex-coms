@@ -238,6 +238,91 @@ describe("wake events", () => {
     }
   });
 
+  it("starts a catch-up wake command for a coalesced pending event after the handler exits", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-catch-up-"));
+    const release = path.join(root, "release");
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const marker = path.join(root, "marker.jsonl");
+      const script = path.join(root, "wake-script.mjs");
+      await writeFile(script, [
+        "import { access, appendFile, readFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "const release = process.argv[3];",
+        "const eventPath = process.argv[4];",
+        "const event = JSON.parse(await readFile(eventPath, 'utf8'));",
+        "await appendFile(marker, `${event.inboxEntryId}\\n`);",
+        "if (event.inboxEntryId === 'message-catch-up-1') {",
+        "  while (true) {",
+        "    try {",
+        "      await access(release);",
+        "      break;",
+        "    } catch {",
+        "      await new Promise((resolve) => setTimeout(resolve, 25));",
+        "    }",
+        "  }",
+        "}"
+      ].join("\n"), "utf8");
+      const entry = (id: string) => ({
+        id,
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary: `message ${id}`,
+        actionHint: "reply when ready",
+        read: false,
+        payload: { text: `message ${id}` }
+      });
+      const command = [process.execPath, script, marker, release];
+      const markerEntries = async (): Promise<string[] | undefined> => {
+        try {
+          return (await readFile(marker, "utf8")).split("\n").filter(Boolean);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        }
+      };
+
+      const first = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-catch-up-1"),
+        config: { enabled: true, command }
+      });
+      expect(first.commandStarted).toBe(true);
+      await waitFor(async () => (await markerEntries())?.join(",") === "message-catch-up-1" ? true : undefined);
+
+      const second = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-catch-up-2"),
+        config: { enabled: true, command }
+      });
+      expect(second.commandStarted).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await markerEntries()).toEqual(["message-catch-up-1"]);
+
+      await writeFile(release, "done\n", "utf8");
+      await waitFor(async () => {
+        const entries = await markerEntries();
+        return entries?.join(",") === "message-catch-up-1,message-catch-up-2" ? entries : undefined;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await markerEntries()).toEqual(["message-catch-up-1", "message-catch-up-2"]);
+      expect((await readPendingWakeEvents(dataDir)).map((event) => event.inboxEntryId)).toEqual([
+        "message-catch-up-1",
+        "message-catch-up-2"
+      ]);
+    } finally {
+      await writeFile(release, "done\n", "utf8").catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("allows concurrent wake commands when configured", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-concurrent-"));
     const release = path.join(root, "release");
