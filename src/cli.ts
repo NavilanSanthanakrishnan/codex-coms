@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -532,7 +532,7 @@ program.command("status")
     const outbox = await readOutboxEntries(config.dataDir);
     const grants = await loadGrants(config.dataDir);
     const runtime = await loadRuntimeStatus(config.dataDir);
-    const pendingWakeEvents = await readPendingWakeEvents(config.dataDir);
+    const wakeCommandStatus = await readWakeCommandStatus(config.dataDir);
     const activeGrants = grants.filter((grant) => isGrantActive(grant));
     const sidecarPid = await readSidecarPid(config.dataDir);
     const sidecarPidRunning = sidecarPid ? isProcessRunning(sidecarPid) : false;
@@ -568,7 +568,11 @@ program.command("status")
       inboxCount: inbox.filter((entry) => !entry.read).length,
       outboxFailedCount: failedOutbox.length,
       lastFailedSend,
-      pendingWakeEvents: pendingWakeEvents.length,
+      pendingWakeEvents: wakeCommandStatus.pendingWakeEvents,
+      pendingWakeCommandEvents: wakeCommandStatus.pendingWakeCommandEvents,
+      attemptedWakeCommandEvents: wakeCommandStatus.attemptedWakeCommandEvents,
+      wakeCommandRunning: wakeCommandStatus.wakeCommandRunning,
+      wakeCommandPid: wakeCommandStatus.wakeCommandPid,
       activeGrants: activeGrants.length,
       transferFolder: path.join(config.dataDir, "transfers"),
       auditLogPath: path.join(config.dataDir, "audit.jsonl"),
@@ -604,6 +608,8 @@ program.command("status")
         console.log(`last failed send: ${status.lastFailedSend.timestamp} to ${status.lastFailedSend.to} (${status.lastFailedSend.error ?? "unknown error"})`);
       }
       console.log(`pending wake events: ${status.pendingWakeEvents}`);
+      console.log(`pending wake command events: ${status.pendingWakeCommandEvents}`);
+      console.log(`wake command running: ${status.wakeCommandRunning}${status.wakeCommandPid ? ` pid ${status.wakeCommandPid}` : ""}`);
       console.log(`active grants: ${status.activeGrants}`);
       console.log(`transfers: ${status.transferFolder}`);
       console.log(`audit: ${status.auditLogPath}`);
@@ -628,10 +634,10 @@ wake.command("status")
   .description("show wake configuration")
   .action(async (options) => {
     const config = await loadCliConfig(options);
-    const pending = await readPendingWakeEvents(config.dataDir);
+    const wakeCommandStatus = await readWakeCommandStatus(config.dataDir);
     console.log(JSON.stringify({
       ...(config.wake ?? { enabled: false }),
-      pendingWakeEvents: pending.length
+      ...wakeCommandStatus
     }, null, 2));
   });
 

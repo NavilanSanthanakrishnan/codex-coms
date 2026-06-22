@@ -243,6 +243,103 @@ describe("wake events", () => {
     }
   });
 
+  it("reports pending wake command events in wake and main status", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-status-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const marker = path.join(root, "status-marker.txt");
+      const script = path.join(root, "wake-status-script.mjs");
+      await writeFile(script, [
+        "import { appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "await appendFile(marker, `${process.env.CODEX_COMS_WAKE_EVENT_ID}\\n`);"
+      ].join("\n"), "utf8");
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-status-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "wake status should show trigger readiness",
+          actionHint: "Inspect status before triggering.",
+          read: false,
+          payload: { text: "wake status should show trigger readiness" }
+        }
+      });
+
+      const { stdout: initialWakeStatusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "status"
+      ], { cwd: process.cwd() });
+      const initialWakeStatus = JSON.parse(initialWakeStatusJson) as Record<string, unknown>;
+      expect(initialWakeStatus.pendingWakeEvents).toBe(1);
+      expect(initialWakeStatus.pendingWakeCommandEvents).toBe(1);
+      expect(initialWakeStatus.attemptedWakeCommandEvents).toBe(0);
+      expect(initialWakeStatus.wakeCommandRunning).toBe(false);
+
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "command",
+        process.execPath,
+        script,
+        marker
+      ], { cwd: process.cwd() });
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--json"
+      ], { cwd: process.cwd() });
+
+      const { stdout: afterWakeStatusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "status"
+      ], { cwd: process.cwd() });
+      const afterWakeStatus = JSON.parse(afterWakeStatusJson) as Record<string, unknown>;
+      expect(afterWakeStatus.pendingWakeEvents).toBe(1);
+      expect(afterWakeStatus.pendingWakeCommandEvents).toBe(0);
+      expect(afterWakeStatus.attemptedWakeCommandEvents).toBe(1);
+
+      const { stdout: mainStatusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "status",
+        "--json"
+      ], { cwd: process.cwd() });
+      const mainStatus = JSON.parse(mainStatusJson) as Record<string, unknown>;
+      expect(mainStatus.pendingWakeEvents).toBe(1);
+      expect(mainStatus.pendingWakeCommandEvents).toBe(0);
+      expect(mainStatus.attemptedWakeCommandEvents).toBe(1);
+      expect(mainStatus.wakeCommandRunning).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("coalesces wake command starts behind a live handler", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-coalesce-"));
     const release = path.join(root, "release");
