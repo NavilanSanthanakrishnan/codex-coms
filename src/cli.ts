@@ -676,6 +676,7 @@ wake.command("notify")
     await updateConfig(config, {
       wake: {
         enabled: true,
+        allowConcurrent: true,
         appendEventPath: false,
         command: [
           "/usr/bin/osascript",
@@ -692,6 +693,7 @@ wake.command("command")
   .argument("<command>", "absolute command path")
   .argument("[args...]", "static command args")
   .option("--prompt <text>", "static prompt argument appended after static args")
+  .option("--allow-concurrent", "start a new wake command for every event instead of coalescing behind a live handler")
   .option("--no-event-path", "do not append the local wake event JSON path as the final argument")
   .action(async (command, args: string[], options) => {
     const config = await loadCliConfig(options);
@@ -703,6 +705,7 @@ wake.command("command")
         enabled: true,
         command: [command, ...args],
         staticPrompt: options.prompt,
+        allowConcurrent: Boolean(options.allowConcurrent),
         appendEventPath: options.eventPath
       }
     });

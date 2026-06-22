@@ -71,4 +71,4 @@ The MVP does not implement offline relay queues. Peers should keep sidecars runn
 
 The MVP does not claim that received files are safe to execute. Treat transfers as data and inspect them first.
 
-codex-coms cannot safely interrupt an arbitrary Codex thread by itself. It records durable local wake events that a local Codex automation, trusted `codex exec` wrapper, or app integration can claim with `codex-coms wake drain` and then decide whether to steer an active task or wake an inactive thread.
+codex-coms cannot safely interrupt an arbitrary Codex thread by itself. It records durable local wake events that a local Codex automation, trusted `codex exec` wrapper, or app integration can claim with `codex-coms wake drain` and then decide whether to steer an active task or wake an inactive thread. Configured wake commands are single-flight by default, so a burst of inbound events does not let a remote peer force duplicate local handler processes.

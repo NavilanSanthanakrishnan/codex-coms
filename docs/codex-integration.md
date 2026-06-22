@@ -58,7 +58,7 @@ Available wake modes:
 
 - `codex-coms wake wait --json`: block a local adapter until wake events arrive, then claim those events without repeatedly checking raw inbox state.
 - `codex-coms wake notify`: show a local macOS notification when an inbox event arrives.
-- `codex-coms wake command /absolute/path [args...] --prompt "<static prompt>"`: run a local command chosen by the user. The command receives static args and, by default, the local wake event JSON path as the final argument. It also receives `CODEX_COMS_WAKE_EVENT_PATH`, `CODEX_COMS_WAKE_FROM`, `CODEX_COMS_WAKE_TYPE`, and related metadata in the environment.
+- `codex-coms wake command /absolute/path [args...] --prompt "<static prompt>"`: run a local command chosen by the user. The command receives static args and, by default, the local wake event JSON path as the final argument. It also receives `CODEX_COMS_WAKE_EVENT_PATH`, `CODEX_COMS_WAKE_FROM`, `CODEX_COMS_WAKE_TYPE`, and related metadata in the environment. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned. Pass `--allow-concurrent` when one process per event is intentional.
 
 This is intentionally not remote thread interruption. A peer message can wake local plumbing, but it cannot choose a Codex command, shell text, or thread. A local adapter decides whether to interrupt an active low-priority task, steer an existing thread, or wake an inactive thread.
 

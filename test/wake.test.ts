@@ -142,6 +142,223 @@ describe("wake events", () => {
     }
   });
 
+  it("coalesces wake command starts behind a live handler", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-coalesce-"));
+    const release = path.join(root, "release");
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const marker = path.join(root, "marker.txt");
+      const script = path.join(root, "wake-script.mjs");
+      await writeFile(script, [
+        "import { access, appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "const release = process.argv[3];",
+        "await appendFile(marker, 'start\\n');",
+        "while (true) {",
+        "  try {",
+        "    await access(release);",
+        "    break;",
+        "  } catch {",
+        "    await new Promise((resolve) => setTimeout(resolve, 25));",
+        "  }",
+        "}"
+      ].join("\n"), "utf8");
+      const entry = (id: string) => ({
+        id,
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary: `message ${id}`,
+        actionHint: "reply when ready",
+        read: false,
+        payload: { text: `message ${id}` }
+      });
+      const command = [process.execPath, script, marker, release];
+      const markerStarts = async (): Promise<number | undefined> => {
+        try {
+          return (await readFile(marker, "utf8")).split("\n").filter(Boolean).length;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        }
+      };
+
+      const first = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-coalesce-1"),
+        config: { enabled: true, command }
+      });
+      expect(first.commandStarted).toBe(true);
+      await waitFor(async () => (await markerStarts()) === 1 ? 1 : undefined);
+
+      const second = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-coalesce-2"),
+        config: { enabled: true, command }
+      });
+      expect(second.commandStarted).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await markerStarts()).toBe(1);
+      expect((await readPendingWakeEvents(dataDir)).map((event) => event.inboxEntryId)).toEqual([
+        "message-coalesce-1",
+        "message-coalesce-2"
+      ]);
+
+      await writeFile(release, "done\n", "utf8");
+      await waitFor(async () => {
+        try {
+          await readFile(path.join(dataDir, "wake-command.lock", "pid"), "utf8");
+          return undefined;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return true;
+          }
+          throw error;
+        }
+      });
+
+      const third = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-coalesce-3"),
+        config: { enabled: true, command }
+      });
+      expect(third.commandStarted).toBe(true);
+      await waitFor(async () => (await markerStarts()) === 2 ? 2 : undefined);
+    } finally {
+      await writeFile(release, "done\n", "utf8").catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows concurrent wake commands when configured", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-concurrent-"));
+    const release = path.join(root, "release");
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const marker = path.join(root, "marker.txt");
+      const script = path.join(root, "wake-script.mjs");
+      await writeFile(script, [
+        "import { access, appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "const release = process.argv[3];",
+        "await appendFile(marker, 'start\\n');",
+        "while (true) {",
+        "  try {",
+        "    await access(release);",
+        "    break;",
+        "  } catch {",
+        "    await new Promise((resolve) => setTimeout(resolve, 25));",
+        "  }",
+        "}"
+      ].join("\n"), "utf8");
+      const entry = (id: string) => ({
+        id,
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary: `message ${id}`,
+        actionHint: "reply when ready",
+        read: false,
+        payload: { text: `message ${id}` }
+      });
+      const config = {
+        enabled: true,
+        command: [process.execPath, script, marker, release],
+        allowConcurrent: true
+      };
+
+      await expect(dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-concurrent-1"),
+        config
+      })).resolves.toMatchObject({ commandStarted: true });
+      await expect(dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: entry("message-concurrent-2"),
+        config
+      })).resolves.toMatchObject({ commandStarted: true });
+
+      await waitFor(async () => {
+        try {
+          const starts = (await readFile(marker, "utf8")).split("\n").filter(Boolean).length;
+          return starts === 2 ? starts : undefined;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        }
+      });
+    } finally {
+      await writeFile(release, "done\n", "utf8").catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a stale wake command lock owned by a dead process", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-command-dead-lock-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const marker = path.join(root, "marker.txt");
+      const script = path.join(root, "wake-script.mjs");
+      const lockPath = path.join(dataDir, "wake-command.lock");
+      await writeFile(script, [
+        "import { writeFile } from 'node:fs/promises';",
+        "await writeFile(process.argv[2], 'started\\n');"
+      ].join("\n"), "utf8");
+      await mkdir(lockPath, { recursive: true });
+      await writeFile(path.join(lockPath, "pid"), "99999999\n", "utf8");
+      const staleTime = new Date(Date.now() - 10_000);
+      await utimes(lockPath, staleTime, staleTime);
+
+      const result = await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: {
+          id: "message-command-dead-lock-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "wake command should reclaim dead lock",
+          actionHint: "reply when ready",
+          read: false,
+          payload: { text: "wake command should reclaim dead lock" }
+        },
+        config: {
+          enabled: true,
+          command: [process.execPath, script, marker]
+        }
+      });
+
+      expect(result.commandStarted).toBe(true);
+      await waitFor(async () => {
+        try {
+          return await readFile(marker, "utf8");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        }
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("waits for and drains the next local wake event", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-wait-"));
     try {

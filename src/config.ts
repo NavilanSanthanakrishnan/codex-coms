@@ -11,6 +11,7 @@ export interface WakeSettings {
   command?: string[];
   staticPrompt?: string;
   appendEventPath?: boolean;
+  allowConcurrent?: boolean;
 }
 
 export interface CodexComsConfig {
