@@ -4,6 +4,11 @@ codex-coms is a Skills-first communication layer that lets two Codex agents on d
 
 The relay routes messages only. Each local sidecar is the security gatekeeper for its own workspace.
 
+## Requirements
+
+- Node.js 22.12.0 or newer.
+- npm with lockfile v3 support, such as the npm bundled with current Node.js releases.
+
 ## Two-Computer Quickstart
 
 Computer A:
