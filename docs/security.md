@@ -21,7 +21,8 @@ codex-coms treats the relay as untrusted transport and each peer message as untr
 - Received files never overwrite existing files.
 - Received files are SHA-256 checked before being written.
 - Remote peers cannot configure local wake commands.
-- Inbound messages can trigger wake only after the local user explicitly configures it.
+- Inbound messages always create local wake event records, but command execution can trigger only after the local user explicitly configures it.
+- Wake commands receive local event file paths and metadata only; remote peer text is not passed as shell input.
 - `send` records `message_sent` only after a peer acknowledgement; failed sends are logged as `send_failed`.
 
 ## Default Deny Paths
@@ -56,6 +57,7 @@ Events include:
 - Remote list/read allowed and denied.
 - File offer, accept, complete, reject, and error outcomes.
 - Wake attempts.
+- Wake event queueing and wake command failures.
 - Runtime errors.
 
 Audit details are redacted for sensitive key names such as token, secret, password, authorization, cookie, and key.
@@ -68,4 +70,4 @@ The MVP does not implement offline relay queues. Peers should keep sidecars runn
 
 The MVP does not claim that received files are safe to execute. Treat transfers as data and inspect them first.
 
-The MVP cannot safely interrupt an arbitrary Codex thread by itself. Use local Codex automations, a trusted `codex exec` wrapper, or manual inbox checks when you want the agent to act on unread messages.
+codex-coms cannot safely interrupt an arbitrary Codex thread by itself. It records durable local wake events that a local Codex automation, trusted `codex exec` wrapper, or app integration can claim with `codex-coms wake drain` and then decide whether to steer an active task or wake an inactive thread.

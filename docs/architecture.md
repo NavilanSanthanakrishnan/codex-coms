@@ -41,6 +41,9 @@ Direct CLI commands such as `send`, `request-read`, `list-remote`, `read-remote`
 - `grants.json`: local read-only grants.
 - `audit.jsonl`: append-only local audit events.
 - `status.json`: last known sidecar connection state.
+- `wake-events.jsonl`: append-only local wake event log for inbound inbox events.
+- `wake-state.json`: local drain state for wake events already claimed by a thread or automation.
+- `wake/`: latest wake event JSON, per-event JSON files, and a text summary for local wake commands.
 - `transfers/`: received files, grouped by sender and transfer ID.
 
 `config.json` and all `.codex-coms/**` files are denied by remote read filters.
@@ -74,8 +77,14 @@ Received files are saved under `.codex-coms/transfers/<fromAgent>/<transferId>/`
 
 ## Wake Model
 
-Codex is not assumed to passively listen. The stable MVP behavior is polling with `codex-coms inbox`.
+Codex is not assumed to passively listen, but the sidecar should not force Codex to repeatedly poll raw inbox state either. When an inbound message or actionable event arrives, the sidecar writes both an inbox entry and a durable local wake event.
 
-`src/wake/codexWake.ts` contains an optional disabled-by-default wake helper. It can run a locally configured command with static local inputs only. Remote peers cannot choose the command or inject message text into shell execution.
+Wake events are local facts, not peer instructions. Each event contains metadata such as sender, type, priority, summary, inbox entry ID, and paths to local event files. Remote message text is never interpolated into shell commands.
 
-For immediate local awareness, use `codex-coms wake notify`. For autonomous handling, configure a trusted local command that runs Codex non-interactively and checks `codex-coms inbox`. Existing Codex thread interruption remains a local Codex-app/automation concern, not a peer-controlled protocol feature.
+The local user can wire those events into their own Codex runtime:
+
+- `codex-coms wake queue` shows events that have not been claimed.
+- `codex-coms wake drain --json` claims pending events for an active thread, automation, or `codex exec` wrapper.
+- `codex-coms wake command /absolute/path [args...]` starts a trusted local adapter when events arrive. The adapter receives local file paths and environment metadata, then decides whether to notify, steer a current task, or wake an inactive thread.
+
+Existing Codex thread interruption remains a local Codex-app/automation concern, not a peer-controlled protocol feature.

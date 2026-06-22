@@ -9,7 +9,7 @@ export interface WakeSettings {
   enabled: boolean;
   command?: string[];
   staticPrompt?: string;
-  inboxSummaryPath?: string;
+  appendEventPath?: boolean;
 }
 
 export interface CodexComsConfig {

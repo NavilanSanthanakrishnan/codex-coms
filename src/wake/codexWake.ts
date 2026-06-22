@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendAudit } from "../audit/auditLog.js";
 import type { InboxEntry } from "../peer/inbox.js";
@@ -8,48 +8,336 @@ export interface WakeConfig {
   enabled?: boolean;
   command?: string[];
   staticPrompt?: string;
+  appendEventPath?: boolean;
+}
+
+export type WakePriority = "normal" | "action" | "error";
+
+export interface WakeEvent {
+  id: string;
+  inboxEntryId: string;
+  createdAt: string;
+  messageTimestamp: string;
+  localAgentId: string;
+  workspace: string;
+  dataDir: string;
+  from: string;
+  type: string;
+  summary: string;
+  actionHint?: string;
+  priority: WakePriority;
+  eventPath?: string;
   inboxSummaryPath?: string;
 }
 
-export async function maybeWakeCodex(dataDir: string, localAgentId: string, config?: WakeConfig): Promise<void> {
+interface WakeState {
+  drainedIds: string[];
+  updatedAt?: string;
+}
+
+export interface WakeDispatchPaths {
+  eventPath: string;
+  inboxSummaryPath: string;
+}
+
+export interface WakeDispatchResult {
+  event: WakeEvent;
+  eventPath: string;
+  inboxSummaryPath: string;
+  commandStarted: boolean;
+}
+
+const MAX_DRAINED_IDS = 5000;
+const DRAIN_LOCK_STALE_MS = 30_000;
+
+function wakeRoot(dataDir: string): string {
+  return path.join(dataDir, "wake");
+}
+
+function wakeEventsLogPath(dataDir: string): string {
+  return path.join(dataDir, "wake-events.jsonl");
+}
+
+function wakeStatePath(dataDir: string): string {
+  return path.join(dataDir, "wake-state.json");
+}
+
+function wakeDrainLockPath(dataDir: string): string {
+  return path.join(dataDir, "wake-drain.lock");
+}
+
+function safeEventFilename(id: string): string {
+  return `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.json`;
+}
+
+function eventPathFor(dataDir: string, id: string): string {
+  return path.join(wakeRoot(dataDir), "events", safeEventFilename(id));
+}
+
+function latestEventPath(dataDir: string): string {
+  return path.join(wakeRoot(dataDir), "latest.json");
+}
+
+function priorityFor(entry: InboxEntry): WakePriority {
+  if (entry.type === "error") {
+    return "error";
+  }
+  if (entry.type === "workspace.grant.request" || entry.type === "workspace.grant.created" || entry.type === "file.complete") {
+    return "action";
+  }
+  return "normal";
+}
+
+async function readJson<T>(file: string, fallback: T): Promise<T> {
+  try {
+    return JSON.parse(await readFile(file, "utf8")) as T;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return fallback;
+    }
+    throw error;
+  }
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireDrainLock(dataDir: string, timeoutMs = 5000): Promise<() => Promise<void>> {
+  const lockPath = wakeDrainLockPath(dataDir);
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      await mkdir(lockPath, { recursive: false });
+      await writeFile(path.join(lockPath, "pid"), `${process.pid}\n`, "utf8");
+      return async () => {
+        await rm(lockPath, { recursive: true, force: true });
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      try {
+        const info = await stat(lockPath);
+        if (Date.now() - info.mtimeMs > DRAIN_LOCK_STALE_MS) {
+          await rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw statError;
+        }
+      }
+      await sleep(50);
+    }
+  }
+  throw new Error("timed out waiting for wake drain lock");
+}
+
+export function createWakeEvent(input: {
+  dataDir: string;
+  workspace: string;
+  localAgentId: string;
+  entry: InboxEntry;
+}): WakeEvent {
+  return {
+    id: `wake_${input.entry.id}`,
+    inboxEntryId: input.entry.id,
+    createdAt: new Date().toISOString(),
+    messageTimestamp: input.entry.timestamp,
+    localAgentId: input.localAgentId,
+    workspace: input.workspace,
+    dataDir: input.dataDir,
+    from: input.entry.from,
+    type: input.entry.type,
+    summary: input.entry.summary,
+    actionHint: input.entry.actionHint,
+    priority: priorityFor(input.entry)
+  };
+}
+
+export async function appendWakeEvent(dataDir: string, event: WakeEvent): Promise<WakeDispatchPaths> {
+  const eventPath = eventPathFor(dataDir, event.id);
+  const inboxSummaryPath = await writeInboxSummary(dataDir, event);
+  const persisted: WakeEvent = {
+    ...event,
+    eventPath,
+    inboxSummaryPath
+  };
+  await mkdir(path.dirname(eventPath), { recursive: true });
+  await appendFile(wakeEventsLogPath(dataDir), `${JSON.stringify(persisted)}\n`, "utf8");
+  await writeFile(eventPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+  await writeFile(latestEventPath(dataDir), `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+  return { eventPath, inboxSummaryPath };
+}
+
+export async function readWakeEvents(dataDir: string): Promise<WakeEvent[]> {
+  try {
+    const content = await readFile(wakeEventsLogPath(dataDir), "utf8");
+    return content.split("\n").filter(Boolean).map((line) => JSON.parse(line) as WakeEvent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function readWakeState(dataDir: string): Promise<WakeState> {
+  return readJson<WakeState>(wakeStatePath(dataDir), { drainedIds: [] });
+}
+
+export async function readPendingWakeEvents(dataDir: string): Promise<WakeEvent[]> {
+  const [events, state] = await Promise.all([
+    readWakeEvents(dataDir),
+    readWakeState(dataDir)
+  ]);
+  const drained = new Set(state.drainedIds);
+  return events.filter((event) => !drained.has(event.id));
+}
+
+export async function markWakeEventsDrained(dataDir: string, ids: string[]): Promise<number> {
+  if (ids.length === 0) {
+    return 0;
+  }
+  const state = await readWakeState(dataDir);
+  const before = new Set(state.drainedIds);
+  for (const id of ids) {
+    before.add(id);
+  }
+  const drainedIds = [...before].slice(-MAX_DRAINED_IDS);
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(wakeStatePath(dataDir), `${JSON.stringify({
+    drainedIds,
+    updatedAt: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
+  return ids.length;
+}
+
+export async function drainPendingWakeEvents(dataDir: string, limit: number): Promise<WakeEvent[]> {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("limit must be a positive integer");
+  }
+  const release = await acquireDrainLock(dataDir);
+  try {
+    const events = (await readPendingWakeEvents(dataDir)).slice(0, limit);
+    await markWakeEventsDrained(dataDir, events.map((event) => event.id));
+    return events;
+  } finally {
+    await release();
+  }
+}
+
+export function formatWakeEvents(events: WakeEvent[]): string {
+  if (events.length === 0) {
+    return "Wake queue is empty.";
+  }
+  return events.map((event) => {
+    const hint = event.actionHint ? `\n  action: ${event.actionHint}` : "";
+    return `- [${event.priority}] ${event.createdAt} from ${event.from} (${event.type})\n  ${event.summary}${hint}\n  event: ${event.id}\n  inbox: ${event.inboxEntryId}`;
+  }).join("\n");
+}
+
+export async function maybeWakeCodex(dataDir: string, localAgentId: string, config: WakeConfig | undefined, event: WakeEvent, paths: WakeDispatchPaths): Promise<boolean> {
   if (!config?.enabled || !config.command?.length) {
-    return;
+    return false;
   }
   const [command, ...args] = config.command;
   if (!command) {
-    return;
+    return false;
   }
   const safeArgs = [...args];
   if (config.staticPrompt) {
     safeArgs.push(config.staticPrompt);
   }
-  if (config.inboxSummaryPath) {
-    safeArgs.push(config.inboxSummaryPath);
+  if (config.appendEventPath !== false) {
+    safeArgs.push(paths.eventPath);
   }
   await appendAudit(dataDir, {
     event: "wake_attempted",
     actor: localAgentId,
     result: "ok",
-    details: { command }
+    details: { command, wakeEventId: event.id, priority: event.priority }
   });
-  const child = spawn(command, safeArgs, {
-    shell: false,
-    stdio: "ignore",
-    detached: true
-  }) as unknown as { unref: () => void };
-  child.unref();
+  try {
+    const child = spawn(command, safeArgs, {
+      shell: false,
+      stdio: "ignore",
+      detached: true,
+      env: {
+        ...process.env,
+        CODEX_COMS_AGENT_ID: localAgentId,
+        CODEX_COMS_DATA_DIR: dataDir,
+        CODEX_COMS_WORKSPACE: event.workspace,
+        CODEX_COMS_WAKE_EVENT_ID: event.id,
+        CODEX_COMS_WAKE_EVENT_PATH: paths.eventPath,
+        CODEX_COMS_INBOX_SUMMARY_PATH: paths.inboxSummaryPath,
+        CODEX_COMS_WAKE_FROM: event.from,
+        CODEX_COMS_WAKE_TYPE: event.type,
+        CODEX_COMS_WAKE_PRIORITY: event.priority
+      }
+    }) as unknown as { unref: () => void; once: (event: "error", listener: (error: Error) => void) => void };
+    child.once("error", (error) => {
+      appendAudit(dataDir, {
+        event: "wake_failed",
+        actor: localAgentId,
+        result: "error",
+        details: { command, wakeEventId: event.id, reason: error.message }
+      }).catch(() => undefined);
+    });
+    child.unref();
+    return true;
+  } catch (error) {
+    await appendAudit(dataDir, {
+      event: "wake_failed",
+      actor: localAgentId,
+      result: "error",
+      details: { command, wakeEventId: event.id, reason: (error as Error).message }
+    });
+    return false;
+  }
 }
 
-export async function writeInboxSummary(dataDir: string, entry: InboxEntry): Promise<string> {
-  const file = path.join(dataDir, "inbox-summary.txt");
+export async function dispatchWakeEvent(input: {
+  dataDir: string;
+  workspace: string;
+  localAgentId: string;
+  entry: InboxEntry;
+  config?: WakeConfig;
+}): Promise<WakeDispatchResult> {
+  const event = createWakeEvent(input);
+  const paths = await appendWakeEvent(input.dataDir, event);
+  await appendAudit(input.dataDir, {
+    event: "wake_queued",
+    actor: input.localAgentId,
+    peer: input.entry.from,
+    messageId: input.entry.id,
+    result: "ok",
+    details: { wakeEventId: event.id, priority: event.priority }
+  });
+  const commandStarted = await maybeWakeCodex(input.dataDir, input.localAgentId, input.config, event, paths);
+  return {
+    event,
+    eventPath: paths.eventPath,
+    inboxSummaryPath: paths.inboxSummaryPath,
+    commandStarted
+  };
+}
+
+export async function writeInboxSummary(dataDir: string, event: WakeEvent): Promise<string> {
+  const file = path.join(wakeRoot(dataDir), "inbox-summary.txt");
   const summary = [
     "codex-coms received an unread peer event.",
-    `from: ${entry.from}`,
-    `type: ${entry.type}`,
-    `timestamp: ${entry.timestamp}`,
-    `summary: ${entry.summary}`,
-    "Run codex-coms inbox to inspect the full local inbox before taking action."
+    `wakeEvent: ${event.id}`,
+    `inboxEntry: ${event.inboxEntryId}`,
+    `from: ${event.from}`,
+    `type: ${event.type}`,
+    `priority: ${event.priority}`,
+    `timestamp: ${event.messageTimestamp}`,
+    `summary: ${event.summary}`,
+    "Run codex-coms wake drain to claim pending wake events, then codex-coms inbox to inspect the full local inbox before taking action."
   ].join("\n");
+  await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${summary}\n`, "utf8");
   return file;
 }
