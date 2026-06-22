@@ -142,7 +142,7 @@ describe("wake events", () => {
     }
   });
 
-  it("triggers the configured wake command for a pending event after wake is enabled", async () => {
+  it("triggers a pending wake command when wake command is configured", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-trigger-"));
     try {
       const workspace = path.join(root, "workspace");
@@ -185,7 +185,7 @@ describe("wake events", () => {
         }
       });
 
-      await execFileAsync(process.execPath, [
+      const { stdout: commandStdout } = await execFileAsync(process.execPath, [
         ...cliArgs,
         "--workspace",
         workspace,
@@ -195,18 +195,7 @@ describe("wake events", () => {
         script,
         marker
       ], { cwd: process.cwd() });
-
-      const { stdout: triggerJson } = await execFileAsync(process.execPath, [
-        ...cliArgs,
-        "--workspace",
-        workspace,
-        "wake",
-        "trigger",
-        "--json"
-      ], { cwd: process.cwd() });
-      const trigger = JSON.parse(triggerJson) as Record<string, unknown>;
-      expect(trigger.reason).toBe("started");
-      expect(trigger.commandStarted).toBe(true);
+      expect(commandStdout).toContain("Started wake command for pending event wake_message-trigger-1.");
 
       const markerContent = await waitFor(async () => {
         try {
@@ -227,7 +216,7 @@ describe("wake events", () => {
       expect(markerContent.eventPathArg).toBe(markerContent.eventPathEnv);
       expect(String(markerContent.eventPathArg)).toContain(path.join(".codex-coms", "wake", "events"));
 
-      const { stdout: secondTriggerJson } = await execFileAsync(process.execPath, [
+      const { stdout: triggerJson } = await execFileAsync(process.execPath, [
         ...cliArgs,
         "--workspace",
         workspace,
@@ -235,9 +224,9 @@ describe("wake events", () => {
         "trigger",
         "--json"
       ], { cwd: process.cwd() });
-      const secondTrigger = JSON.parse(secondTriggerJson) as Record<string, unknown>;
-      expect(secondTrigger.reason).toBe("already_attempted");
-      expect(secondTrigger.commandStarted).toBe(false);
+      const trigger = JSON.parse(triggerJson) as Record<string, unknown>;
+      expect(trigger.reason).toBe("already_attempted");
+      expect(trigger.commandStarted).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -877,6 +866,7 @@ describe("wake events", () => {
       ]);
 
       await writeFile(release, "done\n", "utf8");
+      await waitFor(async () => (await markerStarts()) === 2 ? 2 : undefined);
       await waitFor(async () => {
         try {
           await readFile(path.join(dataDir, "wake-command.lock", "pid"), "utf8");
@@ -897,7 +887,7 @@ describe("wake events", () => {
         config: { enabled: true, command }
       });
       expect(third.commandStarted).toBe(true);
-      await waitFor(async () => (await markerStarts()) === 2 ? 2 : undefined);
+      await waitFor(async () => (await markerStarts()) === 3 ? 3 : undefined);
     } finally {
       await writeFile(release, "done\n", "utf8").catch(() => undefined);
       await rm(root, { recursive: true, force: true });

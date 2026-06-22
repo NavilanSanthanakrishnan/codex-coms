@@ -732,6 +732,16 @@ wake.command("trigger")
     }
   });
 
+function printConfiguredWakeCatchup(result: Awaited<ReturnType<typeof triggerPendingWakeCommand>>): void {
+  if (result.reason === "started") {
+    console.log(`Started wake command for pending event ${result.event?.id}.`);
+  } else if (result.reason === "not_started") {
+    console.log(`Pending wake event ${result.event?.id} was found, but the wake command was not started. Check the audit log.`);
+  } else if (result.reason === "already_attempted") {
+    console.log("Pending wake events already attempted a wake command. Pass wake trigger --retry-attempted to retry one locally.");
+  }
+}
+
 wake.command("disable")
   .description("disable wake behavior")
   .action(async (options) => {
@@ -746,7 +756,7 @@ wake.command("notify")
   .description("wake with a local macOS notification when inbox events arrive")
   .action(async (options) => {
     const config = await loadCliConfig(options);
-    await updateConfig(config, {
+    const next = await updateConfig(config, {
       wake: {
         enabled: true,
         allowConcurrent: true,
@@ -759,6 +769,7 @@ wake.command("notify")
       }
     });
     console.log("wake enabled with local macOS notification");
+    printConfiguredWakeCatchup(await triggerPendingWakeCommand(next.dataDir, next.agentId, next.wake));
   });
 
 wake.command("command")
@@ -773,7 +784,7 @@ wake.command("command")
     if (!path.isAbsolute(command)) {
       throw new Error("wake command must be an absolute path");
     }
-    await updateConfig(config, {
+    const next = await updateConfig(config, {
       wake: {
         enabled: true,
         command: [command, ...args],
@@ -783,6 +794,7 @@ wake.command("command")
       }
     });
     console.log(`wake enabled with command ${command}`);
+    printConfiguredWakeCatchup(await triggerPendingWakeCommand(next.dataDir, next.agentId, next.wake));
   });
 
 program.command("demo")
