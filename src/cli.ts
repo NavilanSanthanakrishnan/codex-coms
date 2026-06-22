@@ -571,6 +571,8 @@ program.command("status")
       pendingWakeEvents: wakeCommandStatus.pendingWakeEvents,
       pendingWakeCommandEvents: wakeCommandStatus.pendingWakeCommandEvents,
       attemptedWakeCommandEvents: wakeCommandStatus.attemptedWakeCommandEvents,
+      nextWakeEvent: wakeCommandStatus.nextWakeEvent,
+      nextWakeCommandEvent: wakeCommandStatus.nextWakeCommandEvent,
       wakeCommandRunning: wakeCommandStatus.wakeCommandRunning,
       wakeCommandPid: wakeCommandStatus.wakeCommandPid,
       wakeCommandLockPresent: wakeCommandStatus.wakeCommandLockPresent,
@@ -612,6 +614,12 @@ program.command("status")
       }
       console.log(`pending wake events: ${status.pendingWakeEvents}`);
       console.log(`pending wake command events: ${status.pendingWakeCommandEvents}`);
+      if (status.nextWakeEvent) {
+        console.log(`next wake event: ${status.nextWakeEvent.id} inbox=${status.nextWakeEvent.inboxEntryId} from=${status.nextWakeEvent.from} type=${status.nextWakeEvent.type}`);
+      }
+      if (status.nextWakeCommandEvent) {
+        console.log(`next wake command event: ${status.nextWakeCommandEvent.id} inbox=${status.nextWakeCommandEvent.inboxEntryId} from=${status.nextWakeCommandEvent.from} type=${status.nextWakeCommandEvent.type}`);
+      }
       console.log(`wake command running: ${status.wakeCommandRunning}${status.wakeCommandPid ? ` pid ${status.wakeCommandPid}` : ""}`);
       console.log(`wake command lock: ${status.wakeCommandLockPresent ? (status.wakeCommandLockStale ? "stale" : "present") : "none"}`);
       console.log(`active grants: ${status.activeGrants}`);

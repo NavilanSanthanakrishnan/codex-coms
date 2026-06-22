@@ -69,6 +69,8 @@ export interface WakeCommandStatus {
   pendingWakeEvents: number;
   pendingWakeCommandEvents: number;
   attemptedWakeCommandEvents: number;
+  nextWakeEvent?: WakeEvent;
+  nextWakeCommandEvent?: WakeEvent;
   wakeCommandRunning: boolean;
   wakeCommandPid?: number;
   wakeCommandLockPresent: boolean;
@@ -379,11 +381,13 @@ export async function readWakeCommandStatus(dataDir: string): Promise<WakeComman
     readWakeCommandLockStatus(dataDir)
   ]);
   const attempted = new Set(commandState.attemptedIds);
-  const pendingWakeCommandEvents = events.filter((event) => !attempted.has(event.id)).length;
+  const pendingWakeCommandEvents = events.filter((event) => !attempted.has(event.id));
   return {
     pendingWakeEvents: events.length,
-    pendingWakeCommandEvents,
-    attemptedWakeCommandEvents: events.length - pendingWakeCommandEvents,
+    pendingWakeCommandEvents: pendingWakeCommandEvents.length,
+    attemptedWakeCommandEvents: events.length - pendingWakeCommandEvents.length,
+    nextWakeEvent: events[0],
+    nextWakeCommandEvent: pendingWakeCommandEvents[0],
     wakeCommandRunning: commandLock.running,
     wakeCommandPid: commandLock.pid,
     wakeCommandLockPresent: commandLock.present,
