@@ -240,6 +240,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `createWorkspaceSnapshotSummary`: summarizes visible root entries while skipping denied paths.
 - `src/transfer/fileTransfer.ts`: file transfer preparation and receipt.
   - `sanitizeFilename`: strips unsafe filename characters.
+  - `sanitizeTransferId`: strips unsafe transfer ID path characters before creating receive directories.
   - `prepareFileTransfer`: reads a file, hashes it, and splits it into base64 chunks.
   - `FileTransferReceiver.acceptOffer`: validates and records an incoming offer.
   - `FileTransferReceiver.receiveChunk`: stores an incoming chunk in memory.
@@ -265,6 +266,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
 - `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
+- `test/transfer.test.ts`: verifies unsafe transfer IDs cannot place received files outside the transfer folder.
 - `test/wake.test.ts`: verifies sidecar wake-event queueing and locally configured wake command metadata.
 - `test/daemon.test.ts`: verifies daemon sidecar startup from saved config without token arguments.
 - `test/demo.test.ts`: runs `runDemo` and verifies message delivery, remote read success, outside-read denial, file transfer, and audit log output.

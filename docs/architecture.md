@@ -77,7 +77,7 @@ Grant checks enforce:
 
 File transfer uses `file.offer`, `file.accept`, `file.chunk`, and `file.complete`.
 
-Received files are saved under `.codex-coms/transfers/<fromAgent>/<transferId>/`. Filenames are sanitized, existing files are never overwritten, content is hash-checked with SHA-256, and files are written with non-executable permissions.
+Received files are saved under `.codex-coms/transfers/<fromAgent>/<transferId>/`. File names and transfer ID path segments are sanitized, existing files are never overwritten, content is hash-checked with SHA-256, and files are written with non-executable permissions.
 
 ## Wake Model
 
