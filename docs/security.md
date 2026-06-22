@@ -23,6 +23,7 @@ codex-coms treats the relay as untrusted transport and each peer message as untr
 - Remote peers cannot configure local wake commands.
 - Inbound messages always create local wake event records, but command execution can trigger only after the local user explicitly configures it.
 - Wake commands receive local event file paths and metadata only; remote peer text is not passed as shell input.
+- `connect --daemon` starts from saved local config, so the daemon child does not need the room token in its process arguments.
 - `send` records `message_sent` only after a peer acknowledgement; failed sends are logged as `send_failed`.
 
 ## Default Deny Paths

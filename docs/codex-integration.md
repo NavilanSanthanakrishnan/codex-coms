@@ -14,6 +14,14 @@ The repo includes `.agents/skills/codex-coms/SKILL.md`. Codex can load repo-scop
 6. Codex summarizes unread messages.
 7. Codex sends small replies, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
 
+For ongoing collaboration, keep the sidecar online:
+
+```bash
+codex-coms connect --daemon --workspace "$PWD"
+```
+
+Run this after `codex-coms init` so saved config supplies relay, room, agent ID, and token. This avoids repeating the token in long-lived process arguments.
+
 ## Why Not MCP First
 
 MCP is useful for exposing tools to clients, but this MVP needs a simple local developer workflow first. The durable interface for Codex is the Skill plus CLI commands.

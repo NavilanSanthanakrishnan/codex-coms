@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { spawn } from "node:child_process";
+import { mkdir, open } from "node:fs/promises";
 import { appendAudit } from "./audit/auditLog.js";
 import {
   DEFAULT_ROOM,
@@ -46,6 +48,67 @@ async function loadCliConfig(options: Record<string, unknown>): Promise<CodexCom
   return loadConfig(workspace, dataDir);
 }
 
+async function resolveConnectConfig(options: Record<string, unknown>): Promise<CodexComsConfig> {
+  const workspace = workspaceFromOptions(options);
+  const dataDir = dataDirFromOptions(workspace, options);
+  let existing: Partial<CodexComsConfig> = {};
+  try {
+    existing = await loadConfig(workspace, dataDir);
+  } catch {
+    existing = {};
+  }
+  const agentId = typeof options.agent === "string" ? options.agent : existing.agentId;
+  const relay = typeof options.relay === "string" ? options.relay : existing.relay;
+  const room = typeof options.room === "string" ? options.room : existing.room ?? DEFAULT_ROOM;
+  const token = typeof options.token === "string" ? options.token : existing.token;
+  if (!agentId || !relay || !room || !token) {
+    throw new Error("connect needs agent, relay, room, and token; pass them once or run codex-coms init first");
+  }
+  validateAgentId(agentId);
+  const patch = {
+    agentId,
+    relay,
+    room,
+    token,
+    workspace,
+    dataDir
+  };
+  if (existing.agentId) {
+    return updateConfig(existing as CodexComsConfig, patch);
+  }
+  return initWorkspace(patch);
+}
+
+async function startDaemonSidecar(config: CodexComsConfig, options: Record<string, unknown>): Promise<void> {
+  await ensureNoDuplicateSidecar(config.dataDir, Boolean(options.replace));
+  const logPath = path.resolve(config.dataDir, typeof options.log === "string" ? options.log : "sidecar.log");
+  await mkdir(path.dirname(logPath), { recursive: true });
+  const log = await open(logPath, "a");
+  try {
+    const child = spawn(process.execPath, [
+      ...process.execArgv,
+      process.argv[1] ?? path.resolve("dist/src/cli.js"),
+      "connect",
+      "--workspace",
+      config.workspace,
+      "--data-dir",
+      config.dataDir
+    ], {
+      detached: true,
+      stdio: ["ignore", log.fd, log.fd]
+    });
+    if (!child.pid) {
+      throw new Error("failed to start daemon sidecar");
+    }
+    await writeSidecarPid(config.dataDir, child.pid);
+    child.unref();
+    console.log(`started sidecar daemon pid ${child.pid}`);
+    console.log(`log: ${logPath}`);
+  } finally {
+    await log.close();
+  }
+}
+
 program.command("relay")
   .description("start the WebSocket relay")
   .option("--host <host>", "listen host", "127.0.0.1")
@@ -90,39 +153,22 @@ program.command("init")
 
 program.command("connect")
   .description("start the local sidecar and connect it to the relay")
-  .requiredOption("--relay <url>", "relay WebSocket URL")
-  .requiredOption("--room <room>", "room name")
-  .requiredOption("--agent <agentId>", "local agent id")
-  .requiredOption("--token <token>", "shared room token")
+  .option("--relay <url>", "relay WebSocket URL")
+  .option("--room <room>", "room name")
+  .option("--agent <agentId>", "local agent id")
+  .option("--token <token>", "shared room token")
   .option("--workspace <path>", "workspace path")
   .option("--data-dir <path>", "state directory")
   .option("--replace", "stop an existing sidecar for this workspace before connecting")
+  .option("--daemon", "start the sidecar in the background using saved config")
+  .option("--log <path>", "daemon log path, defaults to .codex-coms/sidecar.log")
   .action(async (options) => {
-    validateAgentId(options.agent);
-    const workspace = workspaceFromOptions(options);
-    const dataDir = dataDirFromOptions(workspace, options);
-    await ensureNoDuplicateSidecar(dataDir, Boolean(options.replace));
-    let config: CodexComsConfig;
-    try {
-      config = await loadConfig(workspace, dataDir);
-      config = await updateConfig(config, {
-        agentId: options.agent,
-        relay: options.relay,
-        room: options.room,
-        token: options.token,
-        workspace,
-        dataDir
-      });
-    } catch {
-      config = await initWorkspace({
-        agentId: options.agent,
-        workspace,
-        dataDir,
-        relay: options.relay,
-        room: options.room,
-        token: options.token
-      });
+    const config = await resolveConnectConfig(options);
+    if (options.daemon) {
+      await startDaemonSidecar(config, options);
+      return;
     }
+    await ensureNoDuplicateSidecar(config.dataDir, Boolean(options.replace));
     const sidecar = new PeerSidecar(config);
     let stopping = false;
     const stop = async () => {

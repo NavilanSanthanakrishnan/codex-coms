@@ -25,6 +25,14 @@ npx /path/to/codex-coms init --agent alice --workspace "$PWD" --relay ws://HOST_
 npx /path/to/codex-coms connect --relay ws://HOST_OR_LAN_IP:8787 --room pair --agent alice --token "$TOKEN" --workspace "$PWD"
 ```
 
+After `init`, later sidecar starts can use saved config without putting the room token in the process arguments:
+
+```bash
+codex-coms connect --daemon --workspace "$PWD"
+codex-coms status
+codex-coms disconnect
+```
+
 Computer B sidecar, in Bob's workspace:
 
 ```bash
@@ -71,6 +79,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms relay --host 127.0.0.1 --port 8787 --token <token>` starts the relay.
 - `codex-coms init --agent <agentId> --workspace <path>` creates local state.
 - `codex-coms connect --relay <url> --room <room> --agent <agentId> --token <token> --workspace <path>` starts a sidecar.
+- `codex-coms connect --daemon --workspace <path>` starts a background sidecar from saved config and writes `.codex-coms/sidecar.log`.
 - `codex-coms connect --replace ...` stops the recorded sidecar PID before reconnecting.
 - `codex-coms disconnect` stops the recorded sidecar process for the workspace.
 - `codex-coms rename --agent <agentId> --display-name "Human Name"` updates the local wire ID after the sidecar is stopped.
@@ -236,4 +245,5 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
 - `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
 - `test/wake.test.ts`: verifies sidecar wake-event queueing and locally configured wake command metadata.
+- `test/daemon.test.ts`: verifies daemon sidecar startup from saved config without token arguments.
 - `test/demo.test.ts`: runs `runDemo` and verifies message delivery, remote read success, outside-read denial, file transfer, and audit log output.

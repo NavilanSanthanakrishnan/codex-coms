@@ -42,6 +42,9 @@ export async function ensureNoDuplicateSidecar(dataDir: string, replace = false)
   if (!existing) {
     return;
   }
+  if (existing === process.pid) {
+    return;
+  }
   if (!isProcessRunning(existing)) {
     await clearSidecarPid(dataDir, existing);
     return;

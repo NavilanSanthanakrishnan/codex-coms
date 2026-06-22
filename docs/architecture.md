@@ -31,6 +31,8 @@ Direct CLI commands such as `send`, `request-read`, `list-remote`, `read-remote`
 
 `connect` writes `.codex-coms/sidecar.pid` and refuses to start a duplicate sidecar unless `--replace` is passed. `status` compares config identity, runtime sidecar identity, and PID liveness so identity drift is visible.
 
+After `init` has saved relay, room, agent ID, and token, `connect --daemon` can start the sidecar in the background from saved config. The daemon child does not need the token repeated in process arguments; output is written to `.codex-coms/sidecar.log` by default and `disconnect` stops the recorded PID.
+
 ## State Files
 
 `codex-coms init` creates `.codex-coms/` in the workspace:
