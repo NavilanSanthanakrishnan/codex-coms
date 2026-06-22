@@ -54,3 +54,16 @@ jobs:
 
       - name: Package dry run
         run: npm pack --dry-run
+
+      - name: Packed CLI smoke test
+        run: |
+          set -euo pipefail
+          pack_dir="$(mktemp -d)"
+          install_dir="$(mktemp -d)"
+          workspace_dir="$(mktemp -d)"
+          npm pack --pack-destination "$pack_dir"
+          npm install --prefix "$install_dir" "$pack_dir"/*.tgz
+          "$install_dir/node_modules/.bin/codex-coms" --help
+          "$install_dir/node_modules/.bin/codex-coms" init --agent alice --workspace "$workspace_dir"
+          status_json="$("$install_dir/node_modules/.bin/codex-coms" status --workspace "$workspace_dir" --json)"
+          node -e 'const status = JSON.parse(process.argv[1]); if (status.agentId !== "alice") throw new Error(`expected alice, got ${status.agentId}`); if (status.workspace !== process.argv[2]) throw new Error(`expected workspace ${process.argv[2]}, got ${status.workspace}`);' "$status_json" "$workspace_dir"
