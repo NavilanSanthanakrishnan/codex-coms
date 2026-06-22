@@ -213,7 +213,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `appendInboxEntry`: appends one inbox entry.
   - `appendOutboxEntry`: appends one outbox entry.
   - `readInboxEntries`: reads JSONL inbox entries.
-  - `markInboxRead`: rewrites inbox entries as read.
+  - `markInboxRead`: rewrites inbox entries as read while holding the inbox write lock.
   - `formatInbox`: creates Codex-friendly text output.
 - `src/peer/pid.ts`: sidecar PID helpers.
   - `sidecarPidPath`: resolves `.codex-coms/sidecar.pid`.
@@ -261,6 +261,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 
 ### Tests
 
+- `test/inbox.test.ts`: verifies inbox append and mark-read updates share a lock so manual reads do not overwrite concurrent sidecar appends.
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
 - `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
