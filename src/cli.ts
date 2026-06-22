@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, formatWakeEvents, readPendingWakeEvents, readWakeEvents, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeEvents, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -317,9 +317,12 @@ program.command("inbox")
       console.log(formatInbox(displayed));
     }
     if (options.markRead) {
-      const changed = await markInboxRead(config.dataDir, displayed.map((entry) => entry.id));
+      const displayedIds = displayed.map((entry) => entry.id);
+      const drainedWakeEvents = await drainWakeEventsForInboxEntries(config.dataDir, displayedIds);
+      const changed = await markInboxRead(config.dataDir, displayedIds);
       if (!options.json) {
         console.log(`Marked ${changed} message(s) read.`);
+        console.log(`Drained ${drainedWakeEvents} wake event(s).`);
       }
     }
   });

@@ -98,7 +98,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms send --to <agentId> --text "message"` sends a peer message.
 - `codex-coms inbox` prints unread messages.
 - `codex-coms inbox --json` prints machine-readable inbox entries.
-- `codex-coms inbox --mark-read` marks displayed messages read.
+- `codex-coms inbox --mark-read` marks displayed messages read and drains matching pending wake events.
 - `codex-coms grant --to <agentId> --path <path> --name <name> --ttl 2h` creates a read-only grant.
 - `codex-coms revoke --grant <grantId>` revokes a grant.
 - `codex-coms request-read --to <agentId> --path <path> --reason "why"` asks a peer for access.
@@ -252,6 +252,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `dispatchWakeEvent`: records a durable local wake event and optionally invokes a configured local command.
   - `readPendingWakeEvents`: returns wake events not yet claimed by a local thread or automation.
   - `markWakeEventsDrained`: marks wake events as claimed.
+  - `drainWakeEventsForInboxEntries`: claims pending wake events tied to handled inbox entries.
   - `waitForPendingWakeEvents`: blocks until wake events are available, then claims them.
   - `maybeWakeCodex`: no-ops by default or runs a locally configured static command with local event paths and metadata.
   - `writeInboxSummary`: writes a local summary file for wake commands to inspect.

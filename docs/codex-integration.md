@@ -39,7 +39,10 @@ The manual flow is still:
 ```bash
 codex-coms status
 codex-coms inbox
+codex-coms inbox --mark-read
 ```
+
+When the manual flow marks displayed messages read, codex-coms also drains the matching pending wake events so already-handled messages do not keep appearing as local wake work.
 
 Every inbound inbox event also creates a local wake event. Wake events are durable local metadata: sender, event type, priority, summary, inbox entry ID, and local file paths. A trusted local thread, automation, or `codex exec` wrapper can claim those events:
 
