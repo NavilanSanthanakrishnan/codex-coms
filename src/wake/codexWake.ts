@@ -244,6 +244,25 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number, loc
   }
 }
 
+export async function drainWakeEventsForInboxEntries(dataDir: string, inboxEntryIds: string[], lockTimeoutMs = 5000): Promise<number> {
+  if (inboxEntryIds.length === 0) {
+    return 0;
+  }
+  await mkdir(dataDir, { recursive: true });
+  const release = await acquireDrainLock(dataDir, lockTimeoutMs);
+  try {
+    const inboxEntryIdSet = new Set(inboxEntryIds);
+    const events = await readPendingWakeEvents(dataDir);
+    const wakeEventIds = events
+      .filter((event) => inboxEntryIdSet.has(event.inboxEntryId))
+      .map((event) => event.id);
+    await markWakeEventsDrained(dataDir, wakeEventIds);
+    return wakeEventIds.length;
+  } finally {
+    await release();
+  }
+}
+
 export async function waitForPendingWakeEvents(dataDir: string, options: WakeWaitOptions = {}): Promise<WakeEvent[]> {
   const limit = options.limit ?? 1;
   const timeoutMs = options.timeoutMs ?? 0;
