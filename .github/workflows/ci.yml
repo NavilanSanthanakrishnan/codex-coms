@@ -46,6 +46,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check CLI executable
+        run: test -x dist/src/cli.js
+
       - name: Demo smoke test
         run: npm run demo
 
