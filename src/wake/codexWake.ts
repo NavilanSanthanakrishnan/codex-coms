@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promis
 import path from "node:path";
 import { appendAudit } from "../audit/auditLog.js";
 import type { InboxEntry } from "../peer/inbox.js";
+import { isProcessRunning } from "../peer/pid.js";
 
 export interface WakeConfig {
   enabled?: boolean;
@@ -55,7 +56,7 @@ export interface WakeWaitOptions {
 }
 
 const MAX_DRAINED_IDS = 5000;
-const DRAIN_LOCK_STALE_MS = 30_000;
+const DRAIN_LOCK_STALE_MS = 5_000;
 const DRAIN_LOCK_TIMEOUT_MESSAGE = "timed out waiting for wake drain lock";
 
 function wakeRoot(dataDir: string): string {
@@ -111,7 +112,19 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquireDrainLock(dataDir: string, timeoutMs = 5000): Promise<() => Promise<void>> {
+async function readDrainLockPid(lockPath: string): Promise<number | undefined> {
+  try {
+    const value = Number((await readFile(path.join(lockPath, "pid"), "utf8")).trim());
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function acquireDrainLock(dataDir: string, timeoutMs = 10_000): Promise<() => Promise<void>> {
   const lockPath = wakeDrainLockPath(dataDir);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -128,8 +141,11 @@ async function acquireDrainLock(dataDir: string, timeoutMs = 5000): Promise<() =
       try {
         const info = await stat(lockPath);
         if (Date.now() - info.mtimeMs > DRAIN_LOCK_STALE_MS) {
-          await rm(lockPath, { recursive: true, force: true });
-          continue;
+          const pid = await readDrainLockPid(lockPath);
+          if (!pid || !isProcessRunning(pid)) {
+            await rm(lockPath, { recursive: true, force: true });
+            continue;
+          }
         }
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -226,7 +242,7 @@ export async function markWakeEventsDrained(dataDir: string, ids: string[]): Pro
   return ids.length;
 }
 
-export async function drainPendingWakeEvents(dataDir: string, limit: number, lockTimeoutMs = 5000): Promise<WakeEvent[]> {
+export async function drainPendingWakeEvents(dataDir: string, limit: number, lockTimeoutMs = 10_000): Promise<WakeEvent[]> {
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error("limit must be a positive integer");
   }
@@ -244,7 +260,7 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number, loc
   }
 }
 
-export async function drainWakeEventsForInboxEntries(dataDir: string, inboxEntryIds: string[], lockTimeoutMs = 5000): Promise<number> {
+export async function drainWakeEventsForInboxEntries(dataDir: string, inboxEntryIds: string[], lockTimeoutMs = 5_000): Promise<number> {
   if (inboxEntryIds.length === 0) {
     return 0;
   }
@@ -278,7 +294,7 @@ export async function waitForPendingWakeEvents(dataDir: string, options: WakeWai
   }
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
   const drainForWait = async (): Promise<{ events: WakeEvent[]; timedOut: boolean }> => {
-    const remainingMs = deadline === undefined ? 5000 : Math.max(0, deadline - Date.now());
+    const remainingMs = deadline === undefined ? 10_000 : Math.max(0, deadline - Date.now());
     if (deadline !== undefined && remainingMs === 0) {
       return { events: [], timedOut: true };
     }
