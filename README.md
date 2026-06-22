@@ -69,8 +69,8 @@ Alice reads through the grant:
 
 ```bash
 codex-coms inbox
-codex-coms list-remote --from bob --grant <grantId> --path .
-codex-coms read-remote --from bob --grant <grantId> --path .
+codex-coms list-remote --from bob --grant <grantId> --path . --wait-ms 10000
+codex-coms read-remote --from bob --grant <grantId> --path . --wait-ms 10000
 ```
 
 ## Local Demo
@@ -104,10 +104,10 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms outbox --failed --json` prints machine-readable failed send records.
 - `codex-coms grant --to <agentId> --path <path> --name <name> --ttl 2h` creates a read-only grant.
 - `codex-coms revoke --grant <grantId>` revokes a grant.
-- `codex-coms request-read --to <agentId> --path <path> --reason "why"` asks a peer for access.
-- `codex-coms list-remote --from <agentId> --grant <grantId> --path <relativePath>` lists a granted remote path.
-- `codex-coms read-remote --from <agentId> --grant <grantId> --path <relativePath>` reads a granted remote file.
-- `codex-coms send-file --to <agentId> --path <path>` transfers a file safely.
+- `codex-coms request-read --to <agentId> --path <path> --reason "why" --wait-ms 10000` asks a peer for access after waiting for the target sidecar if needed.
+- `codex-coms list-remote --from <agentId> --grant <grantId> --path <relativePath> --wait-ms 10000` lists a granted remote path after waiting for the granting sidecar if needed.
+- `codex-coms read-remote --from <agentId> --grant <grantId> --path <relativePath> --wait-ms 10000` reads a granted remote file after waiting for the granting sidecar if needed.
+- `codex-coms send-file --to <agentId> --path <path> --wait-ms 10000` transfers a file safely after waiting for the target sidecar if needed.
 - `codex-coms status` shows local state, including sidecar timing, next pending wake-command work, and wake-handler lock state when available.
 - `codex-coms status --peers` asks the relay which agents are connected in the room, reports whether the relay sees the local sidecar, and includes relay-observed peer `connectedAt` and `lastSeenAt` timestamps when the relay provides them.
 - `codex-coms wake notify` enables a local macOS notification for inbound inbox events and tries one local catch-up command for existing pending wake work.
@@ -121,7 +121,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 
 Wire agent IDs cannot contain spaces. Use IDs such as `shreyagent` and `navagent`; use display names for human-facing labels.
 
-The relay does not queue offline inboxes. If `send` says the target is offline, the peer must keep `codex-coms connect` running. Use `send --wait-ms <ms>` when the target sidecar may be starting or reconnecting.
+The relay does not queue offline inboxes. If a peer command says the target is offline, the peer must keep `codex-coms connect` running. Use `--wait-ms <ms>` when the target sidecar may be starting or reconnecting.
 
 ## Runtime Defaults
 

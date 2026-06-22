@@ -93,6 +93,13 @@ async function waitForPeerSidecar(config: CodexComsConfig, peerAgentId: string, 
   throw new Error(`peer ${peerAgentId} did not appear with a sidecar within ${timeoutMs}ms${detail}`);
 }
 
+async function waitForPeerSidecarOption(config: CodexComsConfig, peerAgentId: string, value: unknown): Promise<void> {
+  const waitMs = nonNegativeIntegerOption(value, "--wait-ms");
+  if (waitMs > 0) {
+    await waitForPeerSidecar(config, peerAgentId, waitMs);
+  }
+}
+
 async function resolveConnectConfig(options: Record<string, unknown>): Promise<CodexComsConfig> {
   const workspace = workspaceFromOptions(options);
   const dataDir = dataDirFromOptions(workspace, options);
@@ -324,10 +331,7 @@ program.command("send")
   .action(async (options) => {
     validateAgentId(options.to);
     const config = await loadCliConfig(options);
-    const waitMs = nonNegativeIntegerOption(options.waitMs, "--wait-ms");
-    if (waitMs > 0) {
-      await waitForPeerSidecar(config, options.to, waitMs);
-    }
+    await waitForPeerSidecarOption(config, options.to, options.waitMs);
     const message = await sendAgentMessage(config, options.to, options.text);
     console.log(`sent ${message.id} to ${options.to}`);
   });
@@ -456,8 +460,11 @@ program.command("request-read")
   .requiredOption("--to <agentId>", "target agent id")
   .requiredOption("--path <path>", "path being requested")
   .requiredOption("--reason <reason>", "why the access is needed")
+  .option("--wait-ms <ms>", "wait up to this many milliseconds for the target sidecar before requesting access", "0")
   .action(async (options) => {
+    validateAgentId(options.to);
     const config = await loadCliConfig(options);
+    await waitForPeerSidecarOption(config, options.to, options.waitMs);
     const message = makeProtocolMessage({
       type: "workspace.grant.request",
       room: config.room ?? DEFAULT_ROOM,
@@ -486,8 +493,11 @@ program.command("list-remote")
   .requiredOption("--grant <grantId>", "grant id")
   .option("--path <relativePath>", "relative path inside grant", ".")
   .option("--json", "print JSON")
+  .option("--wait-ms <ms>", "wait up to this many milliseconds for the granting sidecar before listing", "0")
   .action(async (options) => {
+    validateAgentId(options.from);
     const config = await loadCliConfig(options);
+    await waitForPeerSidecarOption(config, options.from, options.waitMs);
     const message = makeProtocolMessage({
       type: "workspace.list.request",
       room: config.room ?? DEFAULT_ROOM,
@@ -518,8 +528,11 @@ program.command("read-remote")
   .requiredOption("--grant <grantId>", "grant id")
   .requiredOption("--path <relativePath>", "relative file path inside grant")
   .option("--json", "print JSON metadata and base64 content")
+  .option("--wait-ms <ms>", "wait up to this many milliseconds for the granting sidecar before reading", "0")
   .action(async (options) => {
+    validateAgentId(options.from);
     const config = await loadCliConfig(options);
+    await waitForPeerSidecarOption(config, options.from, options.waitMs);
     const message = makeProtocolMessage({
       type: "workspace.read.request",
       room: config.room ?? DEFAULT_ROOM,
@@ -545,8 +558,11 @@ program.command("send-file")
   .description("transfer a file to a peer")
   .requiredOption("--to <agentId>", "target agent id")
   .requiredOption("--path <path>", "local file path")
+  .option("--wait-ms <ms>", "wait up to this many milliseconds for the target sidecar before transferring", "0")
   .action(async (options) => {
+    validateAgentId(options.to);
     const config = await loadCliConfig(options);
+    await waitForPeerSidecarOption(config, options.to, options.waitMs);
     const filePath = path.isAbsolute(options.path) ? options.path : path.resolve(config.workspace, options.path);
     const transferId = await sendFileToPeer(config, options.to, filePath);
     console.log(`sent file transfer ${transferId} to ${options.to}`);

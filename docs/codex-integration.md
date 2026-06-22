@@ -12,7 +12,7 @@ The repo includes `.agents/skills/codex-coms/SKILL.md`. Codex can load repo-scop
 4. Codex runs `codex-coms status --peers` when it needs to know whether the peer sidecar is online, including recent relay-seen timestamps when the relay provides them.
 5. Codex runs `codex-coms inbox`.
 6. Codex summarizes unread messages.
-7. Codex sends small replies with `codex-coms send --wait-ms 10000`, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.
+7. Codex sends small replies, asks for access, reads remote grants, or transfers files with explicit CLI commands and `--wait-ms 10000` for peer-facing operations.
 
 For ongoing collaboration, keep the sidecar online:
 
