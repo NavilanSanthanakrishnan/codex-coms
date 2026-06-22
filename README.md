@@ -113,7 +113,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms wake queue` shows pending local wake events.
 - `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper. Pass `--event <wakeOrInboxId>` to claim the exact event that woke a local adapter.
 - `codex-coms wake wait --json` blocks until local wake events are available, then claims them for a local adapter.
-- `codex-coms wake trigger --json` starts the configured local wake command for the next pending wake event that has not already attempted one. Pass `--event <wakeOrInboxId>` to target a specific pending event, or `--retry-attempted` to retry an attempted pending event after fixing local wake configuration.
+- `codex-coms wake trigger --json` starts the configured local wake command for the next pending wake event that has not already attempted one. Pass `--event <wakeOrInboxId>` to target a specific pending event, `--all` to start all eligible pending events when concurrent wake is enabled, or `--retry-attempted` to retry an attempted pending event after fixing local wake configuration.
 - `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default. When configured, it tries one local catch-up command for existing pending wake work. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned; when the handler exits, the next pending unattempted event gets one catch-up command. `codex-coms connect` also tries one local catch-up command after connecting when pending unattempted wake events already exist. Pass `--allow-concurrent` when one process per event is intentional.
 - `codex-coms wake disable` disables wake behavior.
 - `codex-coms demo` runs the local simulation.
@@ -263,6 +263,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `drainWakeEventsForInboxEntries`: claims pending wake events tied to handled inbox entries.
   - `waitForPendingWakeEvents`: blocks until wake events are available, then claims them.
   - `triggerPendingWakeCommand`: starts the configured local wake command for the next pending unattempted event, optionally targeting a specific wake/inbox ID or explicitly retrying an attempted pending event.
+  - `triggerPendingWakeCommands`: starts configured local wake commands for all eligible pending events when concurrent wake is enabled.
   - `maybeWakeCodex`: no-ops by default or runs a locally configured static command with local event paths and metadata.
   - `writeInboxSummary`: writes per-event summary files and a latest summary file for wake commands to inspect.
 - `src/demo/runDemo.ts`: end-to-end local simulation.
