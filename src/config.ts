@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const DEFAULT_DATA_DIR = ".codex-coms";
@@ -77,7 +77,9 @@ export async function readJson<T>(file: string, fallback: T): Promise<T> {
 
 export async function writeJson(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const tempFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempFile, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempFile, file);
 }
 
 export async function initWorkspace(input: {

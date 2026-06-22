@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -23,6 +24,25 @@ async function waitFor<T>(producer: () => Promise<T | undefined>, timeoutMs = 50
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("timed out waiting for condition");
+}
+
+async function unusedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  if (!address || typeof address === "string") {
+    throw new Error("could not allocate test port");
+  }
+  return address.port;
 }
 
 describe("sidecar daemon", () => {
@@ -94,6 +114,83 @@ describe("sidecar daemon", () => {
         process.kill(pid, "SIGTERM");
       }
       await relay.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps retrying until the relay becomes available", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-daemon-retry-"));
+    const port = await unusedPort();
+    let relay: RelayServer | undefined;
+    const aliceWorkspace = path.join(root, "alice");
+    const bobWorkspace = path.join(root, "bob");
+    await mkdir(aliceWorkspace, { recursive: true });
+    await mkdir(bobWorkspace, { recursive: true });
+    const relayUrl = `ws://127.0.0.1:${port}`;
+    const alice = await initWorkspace({
+      agentId: "alice",
+      workspace: aliceWorkspace,
+      relay: relayUrl,
+      room: "pair",
+      token: "test-token"
+    });
+    const bob = await initWorkspace({
+      agentId: "bob",
+      workspace: bobWorkspace,
+      relay: relayUrl,
+      room: "pair",
+      token: "test-token"
+    });
+    try {
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "connect",
+        "--daemon",
+        "--workspace",
+        bobWorkspace,
+        "--retry-delay-ms",
+        "100"
+      ], { cwd: process.cwd() });
+      const pid = await waitFor(async () => {
+        const value = await readSidecarPid(bob.dataDir);
+        return value && isProcessRunning(value) ? value : undefined;
+      });
+      const beforeRelay = await loadRuntimeStatus(bob.dataDir);
+      expect(beforeRelay.connected).toBe(false);
+
+      relay = new RelayServer({
+        host: "127.0.0.1",
+        port,
+        token: "test-token"
+      });
+      await relay.start();
+      await waitFor(async () => {
+        const status = await loadRuntimeStatus(bob.dataDir);
+        return status.connected && status.pid === pid ? status : undefined;
+      }, 8000);
+      await sendAgentMessage(alice, "bob", "hello after retry");
+      const inbox = await waitFor(async () => {
+        const entries = await readInboxEntries(bob.dataDir);
+        return entries.find((entry) => entry.summary.includes("hello after retry")) ? entries : undefined;
+      });
+      expect(inbox).toHaveLength(1);
+
+      await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "disconnect",
+        "--workspace",
+        bobWorkspace
+      ], { cwd: process.cwd() });
+      await waitFor(async () => {
+        const status = await loadRuntimeStatus(bob.dataDir);
+        return !status.connected ? status : undefined;
+      });
+    } finally {
+      const pid = await readSidecarPid(bob.dataDir);
+      if (pid && isProcessRunning(pid)) {
+        process.kill(pid, "SIGTERM");
+      }
+      await relay?.stop();
       await rm(root, { recursive: true, force: true });
     }
   });

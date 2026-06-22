@@ -33,6 +33,8 @@ codex-coms status
 codex-coms disconnect
 ```
 
+Daemon sidecars keep retrying when the relay is temporarily unavailable. Tune retry speed with `--retry-delay-ms <ms>`.
+
 Computer B sidecar, in Bob's workspace:
 
 ```bash
@@ -79,7 +81,8 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms relay --host 127.0.0.1 --port 8787 --token <token>` starts the relay.
 - `codex-coms init --agent <agentId> --workspace <path>` creates local state.
 - `codex-coms connect --relay <url> --room <room> --agent <agentId> --token <token> --workspace <path>` starts a sidecar.
-- `codex-coms connect --daemon --workspace <path>` starts a background sidecar from saved config and writes `.codex-coms/sidecar.log`.
+- `codex-coms connect --daemon --workspace <path>` starts a background sidecar from saved config, writes `.codex-coms/sidecar.log`, and retries relay connection failures.
+- `codex-coms connect --retry --workspace <path>` keeps a foreground sidecar reconnecting after relay drops.
 - `codex-coms connect --replace ...` stops the recorded sidecar PID before reconnecting.
 - `codex-coms disconnect` stops the recorded sidecar process for the workspace.
 - `codex-coms rename --agent <agentId> --display-name "Human Name"` updates the local wire ID after the sidecar is stopped.

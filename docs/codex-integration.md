@@ -22,6 +22,8 @@ codex-coms connect --daemon --workspace "$PWD"
 
 Run this after `codex-coms init` so saved config supplies relay, room, agent ID, and token. This avoids repeating the token in long-lived process arguments.
 
+Daemon mode retries relay connection failures, so transient tunnel or network drops should become local sidecar log entries instead of silent collaboration outages.
+
 ## Why Not MCP First
 
 MCP is useful for exposing tools to clients, but this MVP needs a simple local developer workflow first. The durable interface for Codex is the Skill plus CLI commands.
