@@ -70,6 +70,9 @@ export interface WakeCommandStatus {
   attemptedWakeCommandEvents: number;
   wakeCommandRunning: boolean;
   wakeCommandPid?: number;
+  wakeCommandLockPresent: boolean;
+  wakeCommandLockStale: boolean;
+  wakeCommandLockAgeMs?: number;
 }
 
 export interface WakeWaitOptions {
@@ -258,6 +261,38 @@ function isDrainLockTimeout(error: unknown): boolean {
   return error instanceof Error && error.message === DRAIN_LOCK_TIMEOUT_MESSAGE;
 }
 
+async function readWakeCommandLockStatus(dataDir: string): Promise<{
+  present: boolean;
+  pid?: number;
+  running: boolean;
+  stale: boolean;
+  ageMs?: number;
+}> {
+  const lockPath = wakeCommandLockPath(dataDir);
+  try {
+    const info = await stat(lockPath);
+    const pid = await readLockPid(lockPath);
+    const running = Boolean(pid && isProcessRunning(pid));
+    const ageMs = Math.max(0, Date.now() - info.mtimeMs);
+    return {
+      present: true,
+      pid,
+      running,
+      stale: Boolean((pid && !running) || (!pid && ageMs > COMMAND_LOCK_STALE_MS)),
+      ageMs
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        present: false,
+        running: false,
+        stale: false
+      };
+    }
+    throw error;
+  }
+}
+
 export function createWakeEvent(input: {
   dataDir: string;
   workspace: string;
@@ -336,10 +371,10 @@ export async function readPendingWakeEvents(dataDir: string): Promise<WakeEvent[
 }
 
 export async function readWakeCommandStatus(dataDir: string): Promise<WakeCommandStatus> {
-  const [events, commandState, wakeCommandPid] = await Promise.all([
+  const [events, commandState, commandLock] = await Promise.all([
     readPendingWakeEvents(dataDir),
     readWakeCommandState(dataDir),
-    readLockPid(wakeCommandLockPath(dataDir))
+    readWakeCommandLockStatus(dataDir)
   ]);
   const attempted = new Set(commandState.attemptedIds);
   const pendingWakeCommandEvents = events.filter((event) => !attempted.has(event.id)).length;
@@ -347,8 +382,11 @@ export async function readWakeCommandStatus(dataDir: string): Promise<WakeComman
     pendingWakeEvents: events.length,
     pendingWakeCommandEvents,
     attemptedWakeCommandEvents: events.length - pendingWakeCommandEvents,
-    wakeCommandRunning: Boolean(wakeCommandPid && isProcessRunning(wakeCommandPid)),
-    wakeCommandPid
+    wakeCommandRunning: commandLock.running,
+    wakeCommandPid: commandLock.pid,
+    wakeCommandLockPresent: commandLock.present,
+    wakeCommandLockStale: commandLock.stale,
+    wakeCommandLockAgeMs: commandLock.ageMs
   };
 }
 
