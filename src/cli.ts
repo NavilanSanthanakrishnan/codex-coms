@@ -318,8 +318,8 @@ program.command("inbox")
     }
     if (options.markRead) {
       const displayedIds = displayed.map((entry) => entry.id);
-      const changed = await markInboxRead(config.dataDir, displayedIds);
       const drainedWakeEvents = await drainWakeEventsForInboxEntries(config.dataDir, displayedIds);
+      const changed = await markInboxRead(config.dataDir, displayedIds);
       if (!options.json) {
         console.log(`Marked ${changed} message(s) read.`);
         console.log(`Drained ${drainedWakeEvents} wake event(s).`);

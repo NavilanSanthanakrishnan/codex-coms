@@ -224,6 +224,58 @@ describe("wake events", () => {
     }
   });
 
+  it("leaves inbox entries unread when the matching wake drain fails", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-inbox-read-lock-"));
+    try {
+      const workspace = path.join(root, "bob");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const entry = {
+        id: "message-read-lock-1",
+        timestamp: new Date().toISOString(),
+        from: "alice",
+        type: "agent.message",
+        summary: "manual inbox read should wait for wake drain",
+        actionHint: "reply when ready",
+        read: false,
+        payload: { text: "manual inbox read should wait for wake drain" }
+      };
+      await appendInboxEntry(config.dataDir, entry);
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry
+      });
+      await mkdir(path.join(config.dataDir, "wake-drain.lock"), { recursive: true });
+
+      let stderr = "";
+      try {
+        await execFileAsync(process.execPath, [
+          ...cliArgs,
+          "inbox",
+          "--workspace",
+          workspace,
+          "--mark-read"
+        ], { cwd: process.cwd() });
+      } catch (error) {
+        stderr = String((error as { stderr?: string }).stderr ?? "");
+      }
+
+      expect(stderr).toContain("timed out waiting for wake drain lock");
+      expect((await readInboxEntries(config.dataDir))[0]?.read).toBe(false);
+      expect(await readPendingWakeEvents(config.dataDir)).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("honors wake wait timeout while the drain lock is held", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-wait-lock-"));
     try {
