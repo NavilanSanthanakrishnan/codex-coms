@@ -4,6 +4,9 @@
   "description": "Skills-first communication layer for two Codex agents over WebSocket.",
   "type": "module",
   "main": "dist/src/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "bin": {
     "codex-coms": "dist/src/cli.js"
   },
