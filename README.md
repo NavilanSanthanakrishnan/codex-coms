@@ -96,6 +96,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms disconnect` stops the recorded sidecar process for the workspace.
 - `codex-coms rename --agent <agentId> --display-name "Human Name"` updates the local wire ID after the sidecar is stopped.
 - `codex-coms send --to <agentId> --text "message"` sends a peer message.
+- `codex-coms send --to <agentId> --text "message" --wait-ms 10000` waits for the target sidecar before sending.
 - `codex-coms inbox` prints unread messages.
 - `codex-coms inbox --json` prints machine-readable inbox entries.
 - `codex-coms inbox --mark-read` marks displayed messages read and drains matching pending wake events.
@@ -120,7 +121,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 
 Wire agent IDs cannot contain spaces. Use IDs such as `shreyagent` and `navagent`; use display names for human-facing labels.
 
-The relay does not queue offline inboxes. If `send` says the target is offline, the peer must keep `codex-coms connect` running.
+The relay does not queue offline inboxes. If `send` says the target is offline, the peer must keep `codex-coms connect` running. Use `send --wait-ms <ms>` when the target sidecar may be starting or reconnecting.
 
 ## Runtime Defaults
 
@@ -272,7 +273,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 ### Tests
 
 - `test/inbox.test.ts`: verifies inbox append and mark-read updates share a lock so manual reads do not overwrite concurrent sidecar appends.
-- `test/cli.test.ts`: verifies failed-send outbox filtering and status summary JSON.
+- `test/cli.test.ts`: verifies delayed sidecar send waiting, failed-send outbox filtering, and status summary JSON.
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
 - `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit/outbox behavior.
