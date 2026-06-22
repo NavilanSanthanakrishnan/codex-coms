@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { initWorkspace, loadRuntimeStatus } from "../src/config.js";
-import { sendAgentMessage } from "../src/peer/client.js";
+import { PeerSidecar, sendAgentMessage } from "../src/peer/client.js";
 import { readInboxEntries } from "../src/peer/inbox.js";
 import { isProcessRunning, readSidecarPid } from "../src/peer/pid.js";
 import { RelayServer } from "../src/relay/server.js";
@@ -46,6 +46,44 @@ async function unusedPort(): Promise<number> {
 }
 
 describe("sidecar daemon", () => {
+  it("preserves the last connected timestamp after the sidecar disconnects", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-sidecar-status-time-"));
+    const relay = new RelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "test-token"
+    });
+    const started = await relay.start();
+    const workspace = path.join(root, "alice");
+    await mkdir(workspace, { recursive: true });
+    const config = await initWorkspace({
+      agentId: "alice",
+      workspace,
+      relay: started.url,
+      room: "pair",
+      token: "test-token"
+    });
+    const sidecar = new PeerSidecar(config);
+    try {
+      await sidecar.start();
+      const connected = await waitFor(async () => {
+        const status = await loadRuntimeStatus(config.dataDir);
+        return status.connected && status.connectedAt ? status : undefined;
+      });
+
+      await relay.stop();
+      await sidecar.waitForClose();
+
+      const disconnected = await loadRuntimeStatus(config.dataDir);
+      expect(disconnected.connected).toBe(false);
+      expect(disconnected.connectedAt).toBe(connected.connectedAt);
+      expect(disconnected.disconnectedAt).toBeDefined();
+    } finally {
+      await relay.stop().catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("starts in the background from saved config without token args", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-daemon-"));
     const relay = new RelayServer({

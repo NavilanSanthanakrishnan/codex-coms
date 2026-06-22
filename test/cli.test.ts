@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { initWorkspace } from "../src/config.js";
+import { initWorkspace, setRuntimeStatus } from "../src/config.js";
 import { appendOutboxEntry } from "../src/peer/inbox.js";
 
 const execFileAsync = promisify(execFile);
@@ -70,6 +70,54 @@ describe("CLI", () => {
         to: "bob",
         error: "target bob is not connected"
       }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("shows runtime connection timestamps in status output", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-cli-status-time-"));
+    try {
+      const workspace = path.join(root, "alice");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "alice",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const connectedAt = "2026-06-22T16:00:00.000Z";
+      const disconnectedAt = "2026-06-22T16:05:00.000Z";
+      await setRuntimeStatus(config.dataDir, {
+        connected: false,
+        agentId: "alice",
+        pid: 12345,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        connectedAt,
+        disconnectedAt
+      });
+
+      const { stdout: statusJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "status",
+        "--workspace",
+        workspace,
+        "--json"
+      ], { cwd: process.cwd() });
+      const status = JSON.parse(statusJson) as Record<string, unknown>;
+      expect(status.connectedAt).toBe(connectedAt);
+      expect(status.disconnectedAt).toBe(disconnectedAt);
+
+      const { stdout: statusText } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "status",
+        "--workspace",
+        workspace
+      ], { cwd: process.cwd() });
+      expect(statusText).toContain(`connected at: ${connectedAt}`);
+      expect(statusText).toContain(`disconnected at: ${disconnectedAt}`);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
