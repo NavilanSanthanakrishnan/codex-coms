@@ -34,7 +34,7 @@ Every message has this shape:
 - `workspace.list.response`: list result. Payload includes `requestId`, `ok`, and either `entries` or `error`.
 - `workspace.read.request`: ask the granting sidecar to read a granted file. Payload includes `grantId` and `path`.
 - `workspace.read.response`: read result. Payload includes `requestId`, `ok`, and either file metadata plus `contentBase64` or `error`.
-- `file.offer`: start a file transfer. Payload includes `transferId`, `filename`, `size`, `sha256`, `chunkSize`, and `chunkCount`.
+- `file.offer`: start a file transfer. Payload includes `transferId`, `filename`, `size`, `sha256`, `chunkSize`, and `chunkCount`. Transfer IDs must use only letters, numbers, `.`, `_`, and `-`.
 - `file.accept`: accept or reject a file offer. Payload includes `transferId`, `accepted`, and optional `reason`.
 - `file.chunk`: transfer one base64 chunk. Payload includes `transferId`, `index`, and `dataBase64`.
 - `file.complete`: finish a transfer. Payload includes `transferId`.

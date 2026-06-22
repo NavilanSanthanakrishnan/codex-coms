@@ -42,6 +42,40 @@ describe("protocol schema", () => {
     expect(safeParseProtocolMessage(message).success).toBe(false);
   });
 
+  it("rejects file transfer IDs with path characters", () => {
+    const message = makeProtocolMessage({
+      type: "file.offer",
+      room: "pair",
+      from: "alice",
+      to: "bob",
+      payload: {
+        transferId: "../outside",
+        filename: "note.txt",
+        size: 0,
+        sha256: "0".repeat(64),
+        chunkSize: 1,
+        chunkCount: 0
+      }
+    });
+    expect(safeParseProtocolMessage(message).success).toBe(false);
+
+    const windowsDrive = makeProtocolMessage({
+      type: "file.offer",
+      room: "pair",
+      from: "alice",
+      to: "bob",
+      payload: {
+        transferId: "C:temp",
+        filename: "note.txt",
+        size: 0,
+        sha256: "0".repeat(64),
+        chunkSize: 1,
+        chunkCount: 0
+      }
+    });
+    expect(safeParseProtocolMessage(windowsDrive).success).toBe(false);
+  });
+
   it("accepts room peer status messages", () => {
     const request = makeProtocolMessage({
       type: "room.peers.request",

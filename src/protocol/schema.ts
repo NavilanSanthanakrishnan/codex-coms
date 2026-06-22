@@ -4,6 +4,7 @@ import { protocolTypes, type ProtocolMessage, type ProtocolType } from "./types.
 export const PROTOCOL_VERSION = 1;
 
 const idSchema = z.string().min(1).max(160);
+const transferIdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._-]+$/);
 const agentIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/);
 const roomSchema = z.string().min(1).max(160);
 const isoTimestampSchema = z.string().datetime();
@@ -103,7 +104,7 @@ export const WorkspaceReadResponsePayloadSchema = z.discriminatedUnion("ok", [
 ]);
 
 export const FileOfferPayloadSchema = z.object({
-  transferId: idSchema,
+  transferId: transferIdSchema,
   filename: z.string().min(1).max(255),
   size: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -112,19 +113,19 @@ export const FileOfferPayloadSchema = z.object({
 });
 
 export const FileAcceptPayloadSchema = z.object({
-  transferId: idSchema,
+  transferId: transferIdSchema,
   accepted: z.boolean(),
   reason: z.string().max(1024).optional()
 });
 
 export const FileChunkPayloadSchema = z.object({
-  transferId: idSchema,
+  transferId: transferIdSchema,
   index: z.number().int().nonnegative(),
   dataBase64: z.string()
 });
 
 export const FileCompletePayloadSchema = z.object({
-  transferId: idSchema
+  transferId: transferIdSchema
 });
 
 export const ErrorPayloadSchema = z.object({

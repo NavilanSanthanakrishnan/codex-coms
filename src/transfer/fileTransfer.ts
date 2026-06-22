@@ -35,6 +35,14 @@ export function sanitizeFilename(filename: string): string {
   return base.slice(0, 255);
 }
 
+export function sanitizeTransferId(transferId: string): string {
+  const safe = transferId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 160);
+  if (!safe || safe === "." || safe === "..") {
+    return "transfer";
+  }
+  return safe;
+}
+
 export async function prepareFileTransfer(filePath: string, chunkSize = DEFAULT_CHUNK_SIZE): Promise<PreparedFileTransfer> {
   const content = await readFile(filePath);
   if (content.byteLength > MAX_TRANSFER_BYTES) {
@@ -128,7 +136,7 @@ export class FileTransferReceiver {
     if (content.byteLength !== transfer.size || sha256 !== transfer.sha256) {
       throw new Error("file hash or size does not match offer");
     }
-    const targetDir = path.join(this.dataDir, "transfers", sanitizeFilename(transfer.from), transferId);
+    const targetDir = path.join(this.dataDir, "transfers", sanitizeFilename(transfer.from), sanitizeTransferId(transferId));
     await mkdir(targetDir, { recursive: true });
     const target = path.join(targetDir, transfer.filename);
     await writeFile(target, content, { flag: "wx", mode: 0o600 });
