@@ -243,6 +243,89 @@ describe("wake events", () => {
     }
   });
 
+  it("triggers a pending wake command when the sidecar starts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-sidecar-catchup-"));
+    const relay = new RelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "test-token"
+    });
+    const started = await relay.start();
+    let sidecar: PeerSidecar | undefined;
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: started.url,
+        room: "pair",
+        token: "test-token"
+      });
+      const marker = path.join(root, "sidecar-catchup-marker.txt");
+      const script = path.join(root, "wake-sidecar-catchup-script.mjs");
+      await writeFile(script, [
+        "import { appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "await appendFile(marker, `${process.env.CODEX_COMS_WAKE_EVENT_ID}\\n`);"
+      ].join("\n"), "utf8");
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-sidecar-catchup-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "sidecar startup should catch up",
+          actionHint: "Start the configured wake command.",
+          read: false,
+          payload: { text: "sidecar startup should catch up" }
+        }
+      });
+
+      const updated = await updateConfig(config, {
+        wake: {
+          enabled: true,
+          command: [process.execPath, script, marker]
+        }
+      });
+      sidecar = new PeerSidecar(updated);
+      await sidecar.start();
+
+      const markerContent = await waitFor(async () => {
+        const content = await readFile(marker, "utf8").catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        });
+        return content?.split("\n").filter(Boolean).length === 1 ? content : undefined;
+      });
+      expect(markerContent.split("\n").filter(Boolean)).toEqual([
+        "wake_message-sidecar-catchup-1"
+      ]);
+
+      const { stdout: secondTriggerJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--json"
+      ], { cwd: process.cwd() });
+      const secondTrigger = JSON.parse(secondTriggerJson) as Record<string, unknown>;
+      expect(secondTrigger.reason).toBe("already_attempted");
+      expect(secondTrigger.commandStarted).toBe(false);
+    } finally {
+      await sidecar?.stop().catch(() => undefined);
+      await relay.stop().catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("retries an attempted pending wake event only when requested", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-trigger-retry-"));
     try {

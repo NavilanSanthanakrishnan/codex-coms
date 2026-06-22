@@ -24,7 +24,7 @@ import type { InboxEntry } from "./inbox.js";
 import { FileTransferReceiver, prepareFileTransfer } from "../transfer/fileTransfer.js";
 import { findUsableGrant } from "../workspace/grants.js";
 import { FsAccessError, listGrantedPath, readGrantedFile } from "../workspace/fsAccess.js";
-import { dispatchWakeEvent } from "../wake/codexWake.js";
+import { dispatchWakeEvent, triggerPendingWakeCommand } from "../wake/codexWake.js";
 
 export interface ProtocolConnectionOptions {
   relay: string;
@@ -366,6 +366,7 @@ export class PeerSidecar {
       result: "ok",
       details: { relay: this.config.relay, room: this.config.room }
     });
+    await this.triggerPendingWakeCatchup();
   }
 
   async waitForClose(): Promise<void> {
@@ -443,6 +444,19 @@ export class PeerSidecar {
         actor: this.config.agentId,
         peer: entry.from,
         messageId: entry.id,
+        result: "error",
+        details: { reason: (error as Error).message }
+      });
+    }
+  }
+
+  private async triggerPendingWakeCatchup(): Promise<void> {
+    try {
+      await triggerPendingWakeCommand(this.config.dataDir, this.config.agentId, this.config.wake);
+    } catch (error) {
+      await appendAudit(this.config.dataDir, {
+        event: "wake_failed",
+        actor: this.config.agentId,
         result: "error",
         details: { reason: (error as Error).message }
       });
