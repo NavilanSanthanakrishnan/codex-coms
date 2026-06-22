@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendAudit } from "../audit/auditLog.js";
@@ -45,6 +46,12 @@ export interface WakeDispatchResult {
   eventPath: string;
   inboxSummaryPath: string;
   commandStarted: boolean;
+}
+
+export interface WakeWaitOptions {
+  limit?: number;
+  timeoutMs?: number;
+  pollMs?: number;
 }
 
 const MAX_DRAINED_IDS = 5000;
@@ -218,6 +225,7 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number): Pr
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error("limit must be a positive integer");
   }
+  await mkdir(dataDir, { recursive: true });
   const release = await acquireDrainLock(dataDir);
   try {
     const events = (await readPendingWakeEvents(dataDir)).slice(0, limit);
@@ -226,6 +234,83 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number): Pr
   } finally {
     await release();
   }
+}
+
+export async function waitForPendingWakeEvents(dataDir: string, options: WakeWaitOptions = {}): Promise<WakeEvent[]> {
+  const limit = options.limit ?? 1;
+  const timeoutMs = options.timeoutMs ?? 0;
+  const pollMs = options.pollMs ?? 250;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("limit must be a positive integer");
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0) {
+    throw new Error("timeoutMs must be a non-negative integer");
+  }
+  if (!Number.isInteger(pollMs) || pollMs < 1) {
+    throw new Error("pollMs must be a positive integer");
+  }
+  const existing = await drainPendingWakeEvents(dataDir, limit);
+  if (existing.length > 0) {
+    return existing;
+  }
+  await mkdir(dataDir, { recursive: true });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let watcher: FSWatcher | undefined;
+    let timeout: NodeJS.Timeout | undefined;
+    const interval = setInterval(() => {
+      check().catch(fail);
+    }, pollMs);
+    interval.unref?.();
+    const cleanup = () => {
+      watcher?.close();
+      clearInterval(interval);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
+    const finish = (events: WakeEvent[]) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(events);
+    };
+    function fail(error: unknown): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    }
+    async function check(): Promise<void> {
+      if (settled) {
+        return;
+      }
+      const events = await drainPendingWakeEvents(dataDir, limit);
+      if (events.length > 0) {
+        finish(events);
+      }
+    }
+    try {
+      watcher = watch(dataDir, (_eventType, filename) => {
+        if (!filename || String(filename) === "wake-events.jsonl") {
+          check().catch(fail);
+        }
+      });
+      watcher.on("error", fail);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (timeoutMs > 0) {
+      timeout = setTimeout(() => finish([]), timeoutMs);
+      timeout.unref?.();
+    }
+    check().catch(fail);
+  });
 }
 
 export function formatWakeEvents(events: WakeEvent[]): string {

@@ -6,7 +6,7 @@ import { initWorkspace } from "../src/config.js";
 import { PeerSidecar, sendAgentMessage } from "../src/peer/client.js";
 import { readInboxEntries } from "../src/peer/inbox.js";
 import { RelayServer } from "../src/relay/server.js";
-import { dispatchWakeEvent, drainPendingWakeEvents, readPendingWakeEvents, readWakeEvents } from "../src/wake/codexWake.js";
+import { dispatchWakeEvent, drainPendingWakeEvents, readPendingWakeEvents, readWakeEvents, waitForPendingWakeEvents } from "../src/wake/codexWake.js";
 
 async function waitFor<T>(producer: () => Promise<T | undefined>, timeoutMs = 5000): Promise<T> {
   const started = Date.now();
@@ -130,6 +130,41 @@ describe("wake events", () => {
       expect(markerJson.from).toBe("alice");
       expect(markerJson.type).toBe("workspace.grant.request");
       expect(markerJson.priority).toBe("action");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for and drains the next local wake event", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-wait-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      const waiting = waitForPendingWakeEvents(dataDir, {
+        limit: 1,
+        timeoutMs: 2000,
+        pollMs: 25
+      });
+      await dispatchWakeEvent({
+        dataDir,
+        workspace: root,
+        localAgentId: "bob",
+        entry: {
+          id: "message-wait-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "wake wait should claim this",
+          actionHint: "reply when ready",
+          read: false,
+          payload: { text: "wake wait should claim this" }
+        }
+      });
+
+      const events = await waiting;
+      expect(events).toHaveLength(1);
+      expect(events[0]?.inboxEntryId).toBe("message-wait-1");
+      expect(events[0]?.summary).toContain("wake wait");
+      expect(await readPendingWakeEvents(dataDir)).toHaveLength(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
