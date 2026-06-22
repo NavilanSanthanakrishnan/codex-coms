@@ -41,7 +41,7 @@ Daemon sidecars retry connection failures and relay disconnects by default so tu
 
 - `config.json`: local agent ID, workspace, relay URL, room, and token.
 - `inbox.jsonl`: inbound messages and actionable events.
-- `outbox.jsonl`: outbound message summaries.
+- `outbox.jsonl`: outbound delivery records, including failed sends.
 - `grants.json`: local read-only grants.
 - `audit.jsonl`: append-only local audit events.
 - `status.json`: last known sidecar connection state.

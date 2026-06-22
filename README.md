@@ -99,6 +99,8 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms inbox` prints unread messages.
 - `codex-coms inbox --json` prints machine-readable inbox entries.
 - `codex-coms inbox --mark-read` marks displayed messages read and drains matching pending wake events.
+- `codex-coms outbox` prints outbound delivery records.
+- `codex-coms outbox --failed --json` prints machine-readable failed send records.
 - `codex-coms grant --to <agentId> --path <path> --name <name> --ttl 2h` creates a read-only grant.
 - `codex-coms revoke --grant <grantId>` revokes a grant.
 - `codex-coms request-read --to <agentId> --path <path> --reason "why"` asks a peer for access.
@@ -213,8 +215,10 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `appendInboxEntry`: appends one inbox entry.
   - `appendOutboxEntry`: appends one outbox entry.
   - `readInboxEntries`: reads JSONL inbox entries.
+  - `readOutboxEntries`: reads JSONL outbox entries.
   - `markInboxRead`: rewrites inbox entries as read while holding the inbox write lock.
   - `formatInbox`: creates Codex-friendly text output.
+  - `formatOutbox`: creates Codex-friendly text output for outbound records.
 - `src/peer/pid.ts`: sidecar PID helpers.
   - `sidecarPidPath`: resolves `.codex-coms/sidecar.pid`.
   - `readSidecarPid`: reads the sidecar PID if present.
@@ -263,9 +267,10 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
 ### Tests
 
 - `test/inbox.test.ts`: verifies inbox append and mark-read updates share a lock so manual reads do not overwrite concurrent sidecar appends.
+- `test/cli.test.ts`: verifies failed-send outbox filtering and status summary JSON.
 - `test/protocol.test.ts`: validates happy-path protocol messages and malformed envelope/payload rejection.
 - `test/grants.test.ts`: covers grant creation, allowed list/read, traversal denial, secret-file denial, revocation, and peer scoping.
-- `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit behavior.
+- `test/relay.test.ts`: starts a relay on a random local port, checks same-room message routing, bad-token rejection, peer listing, and failed-send audit/outbox behavior.
 - `test/transfer.test.ts`: verifies unsafe transfer IDs cannot place received files outside the transfer folder.
 - `test/wake.test.ts`: verifies sidecar wake-event queueing and locally configured wake command metadata.
 - `test/daemon.test.ts`: verifies daemon sidecar startup from saved config without token arguments.

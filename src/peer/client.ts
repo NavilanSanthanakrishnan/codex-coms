@@ -166,8 +166,9 @@ export async function sendAgentMessage(config: CodexComsConfig, to: string, text
     to,
     payload: { text }
   });
-  const connection = await ProtocolConnection.open({ ...requireRelayConfig(config), kind: "cli" });
+  let connection: ProtocolConnection | undefined;
   try {
+    connection = await ProtocolConnection.open({ ...requireRelayConfig(config), kind: "cli" });
     connection.send(message);
     const response = await connection.waitFor((item) => {
       if (item.type === "error" && (item.payload as Record<string, unknown>).requestId === message.id) {
@@ -193,17 +194,26 @@ export async function sendAgentMessage(config: CodexComsConfig, to: string, text
       result: "ok"
     });
   } catch (error) {
+    const reason = (error as Error).message;
+    await appendOutboxEntry(config.dataDir, {
+      id: message.id,
+      to,
+      type: message.type,
+      summary: text.slice(0, 200),
+      delivered: false,
+      error: reason
+    });
     await appendAudit(config.dataDir, {
       event: "send_failed",
       actor: config.agentId,
       peer: to,
       messageId: message.id,
       result: "error",
-      details: { reason: (error as Error).message }
+      details: { reason }
     });
     throw error;
   } finally {
-    connection.close();
+    connection?.close();
   }
   return message;
 }

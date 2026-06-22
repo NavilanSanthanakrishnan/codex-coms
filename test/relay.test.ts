@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
 import { readAuditLog } from "../src/audit/auditLog.js";
 import { initWorkspace } from "../src/config.js";
 import { ProtocolConnection, sendAgentMessage } from "../src/peer/client.js";
+import { readOutboxEntries } from "../src/peer/inbox.js";
 import { makeProtocolMessage } from "../src/protocol/schema.js";
 import { RelayServer } from "../src/relay/server.js";
 
@@ -19,6 +21,25 @@ async function waitFor<T>(producer: () => T | undefined, timeoutMs = 2000): Prom
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("timed out waiting for condition");
+}
+
+async function unusedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  if (!address || typeof address === "string") {
+    throw new Error("could not allocate test port");
+  }
+  return address.port;
 }
 
 describe("relay server", () => {
@@ -165,7 +186,7 @@ describe("relay server", () => {
     }
   });
 
-  it("audits failed sends without recording message_sent ok", async () => {
+  it("records failed sends without recording message_sent ok", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-send-fail-"));
     const relay = new RelayServer({
       host: "127.0.0.1",
@@ -183,10 +204,48 @@ describe("relay server", () => {
       });
       await expect(sendAgentMessage(config, "bob", "hello")).rejects.toThrow("Target peers must have codex-coms connect running");
       const audit = await readAuditLog(config.dataDir);
+      const outbox = await readOutboxEntries(config.dataDir);
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0]).toEqual(expect.objectContaining({
+        id: expect.any(String),
+        to: "bob",
+        type: "agent.message",
+        summary: "hello",
+        delivered: false,
+        error: expect.stringContaining("Target peers must have codex-coms connect running")
+      }));
       expect(audit.some((entry) => entry.event === "send_failed")).toBe(true);
       expect(audit.some((entry) => entry.event === "message_sent" && entry.result === "ok")).toBe(false);
     } finally {
       await relay.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("records failed sends when the relay connection cannot open", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-send-open-fail-"));
+    try {
+      const port = await unusedPort();
+      const config = await initWorkspace({
+        agentId: "alice",
+        workspace: root,
+        relay: `ws://127.0.0.1:${port}`,
+        room: "pair",
+        token: "test-token"
+      });
+      await expect(sendAgentMessage(config, "bob", "hello")).rejects.toThrow();
+      const outbox = await readOutboxEntries(config.dataDir);
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0]).toEqual(expect.objectContaining({
+        to: "bob",
+        type: "agent.message",
+        summary: "hello",
+        delivered: false,
+        error: expect.any(String)
+      }));
+      const audit = await readAuditLog(config.dataDir);
+      expect(audit.some((entry) => entry.event === "send_failed")).toBe(true);
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
