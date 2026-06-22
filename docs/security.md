@@ -22,6 +22,7 @@ codex-coms treats the relay as untrusted transport and each peer message as untr
 - Received files are SHA-256 checked before being written.
 - Remote peers cannot configure local wake commands.
 - Inbound messages always create local wake event records, but command execution can trigger only after the local user explicitly configures it.
+- `wake drain --event` can only claim local pending wake events by local wake or inbox ID; it does not read remote state or accept remote commands.
 - `wake trigger` can only start the already configured local wake command for local pending events; it does not accept remote-provided commands. Event targeting uses local wake or inbox IDs, and retrying attempted events requires the explicit local `--retry-attempted` flag.
 - Wake command lock status is local diagnostic metadata only; status reporting does not remove locks or run handlers.
 - Wake commands receive local event file paths and metadata only; remote peer text is not passed as shell input.

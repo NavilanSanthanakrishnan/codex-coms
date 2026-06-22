@@ -111,7 +111,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms status --peers` asks the relay which agents are connected in the room.
 - `codex-coms wake notify` enables a local macOS notification for inbound inbox events.
 - `codex-coms wake queue` shows pending local wake events.
-- `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper.
+- `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper. Pass `--event <wakeOrInboxId>` to claim the exact event that woke a local adapter.
 - `codex-coms wake wait --json` blocks until local wake events are available, then claims them for a local adapter.
 - `codex-coms wake trigger --json` starts the configured local wake command for the next pending wake event that has not already attempted one. Pass `--event <wakeOrInboxId>` to target a specific pending event, or `--retry-attempted` to retry an attempted pending event after fixing local wake configuration.
 - `codex-coms wake command /absolute/path [args...]` runs a locally chosen command for inbound events and passes the local wake event JSON path as the final argument by default. Wake commands are single-flight by default: if a previous handler process is still running, new events stay queued and no duplicate handler is spawned; when the handler exits, the next pending unattempted event gets one catch-up command. Pass `--allow-concurrent` when one process per event is intentional.
@@ -259,6 +259,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `readPendingWakeEvents`: returns wake events not yet claimed by a local thread or automation.
   - `readWakeCommandStatus`: reports pending wake events, pending unattempted wake-command events, wake handler liveness, and stale command-lock state.
   - `markWakeEventsDrained`: marks wake events as claimed.
+  - `drainWakeEventById`: claims one pending wake event by local wake ID or inbox entry ID.
   - `drainWakeEventsForInboxEntries`: claims pending wake events tied to handled inbox entries.
   - `waitForPendingWakeEvents`: blocks until wake events are available, then claims them.
   - `triggerPendingWakeCommand`: starts the configured local wake command for the next pending unattempted event, optionally targeting a specific wake/inbox ID or explicitly retrying an attempted pending event.

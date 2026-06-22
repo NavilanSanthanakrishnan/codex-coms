@@ -481,6 +481,96 @@ describe("wake events", () => {
     }
   });
 
+  it("drains a targeted pending wake event by wake id or inbox id", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-drain-target-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-drain-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "first targeted drain event",
+          read: false,
+          payload: { text: "first targeted drain event" }
+        }
+      });
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-drain-2",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "second targeted drain event",
+          read: false,
+          payload: { text: "second targeted drain event" }
+        }
+      });
+
+      const { stdout: secondJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "drain",
+        "--event",
+        "message-drain-2",
+        "--json"
+      ], { cwd: process.cwd() });
+      const second = JSON.parse(secondJson) as Array<Record<string, unknown>>;
+      expect(second).toHaveLength(1);
+      expect(second[0]?.id).toBe("wake_message-drain-2");
+      expect((await readPendingWakeEvents(config.dataDir)).map((event) => event.inboxEntryId)).toEqual([
+        "message-drain-1"
+      ]);
+
+      const { stdout: firstJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "drain",
+        "--event",
+        "wake_message-drain-1",
+        "--json"
+      ], { cwd: process.cwd() });
+      const first = JSON.parse(firstJson) as Array<Record<string, unknown>>;
+      expect(first).toHaveLength(1);
+      expect(first[0]?.inboxEntryId).toBe("message-drain-1");
+
+      const { stdout: missingJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "drain",
+        "--event",
+        "missing-event",
+        "--json"
+      ], { cwd: process.cwd() });
+      expect(JSON.parse(missingJson)).toEqual([]);
+      expect(await readPendingWakeEvents(config.dataDir)).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports pending wake command events in wake and main status", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-status-"));
     try {
@@ -1003,7 +1093,10 @@ describe("wake events", () => {
       expect(first.inboxSummaryPath).not.toBe(second.inboxSummaryPath);
       await expect(readFile(first.inboxSummaryPath, "utf8")).resolves.toContain("first wake summary");
       await expect(readFile(first.inboxSummaryPath, "utf8")).resolves.not.toContain("second wake summary");
-      await expect(readFile(second.inboxSummaryPath, "utf8")).resolves.toContain("second wake summary");
+      const secondSummary = await readFile(second.inboxSummaryPath, "utf8");
+      expect(secondSummary).toContain("second wake summary");
+      expect(secondSummary).toContain("codex-coms wake drain --event wake_message-summary-2 --json");
+      expect(secondSummary).toContain("Use codex-coms inbox only when the adapter needs the full local message payload.");
       await expect(readFile(path.join(dataDir, "wake", "inbox-summary.txt"), "utf8")).resolves.toContain("second wake summary");
     } finally {
       await rm(root, { recursive: true, force: true });

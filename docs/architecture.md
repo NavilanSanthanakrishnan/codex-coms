@@ -90,7 +90,7 @@ The local user can wire those events into their own Codex runtime:
 
 - `codex-coms status` reports pending wake events, pending unattempted wake-command events, live wake handler state, and stale wake command locks.
 - `codex-coms wake queue` shows events that have not been claimed.
-- `codex-coms wake drain --json` claims pending events for an active thread, automation, or `codex exec` wrapper.
+- `codex-coms wake drain --json` claims pending events for an active thread, automation, or `codex exec` wrapper. `--event <wakeOrInboxId>` claims one exact event for adapters that were launched with event metadata.
 - `codex-coms wake wait --json` blocks a local adapter until wake events are available, then claims them without repeatedly checking raw inbox state.
 - `codex-coms wake trigger --json` starts the configured local wake command for the next pending event that has not already attempted one, which lets a recovered local adapter handle events that arrived while it was down. `--event <wakeOrInboxId>` can target one pending event, and `--retry-attempted` can explicitly retry an attempted pending event after the local handler is fixed.
 - `codex-coms wake command /absolute/path [args...]` starts a trusted local adapter when events arrive. The adapter receives local file paths and environment metadata, then decides whether to notify, steer a current task, or wake an inactive thread. Handler processes are single-flight by default, so bursts of inbound events queue behind one live local handler instead of spawning duplicate handlers. When that handler exits, codex-coms starts one catch-up handler for the next pending event that has not already had a command attempted.
