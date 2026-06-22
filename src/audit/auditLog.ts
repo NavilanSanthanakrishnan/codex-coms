@@ -12,6 +12,7 @@ export interface AuditEvent {
 }
 
 const sensitiveKeyPattern = /(token|secret|password|authorization|cookie|key)/i;
+const contentKeyPattern = /^(payload|content|contentBase64|dataBase64|body|text|raw|bytes|buffer)$/i;
 
 export function redactSensitive(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -22,7 +23,7 @@ export function redactSensitive(value: unknown): unknown {
   }
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] = sensitiveKeyPattern.test(key) ? "[redacted]" : redactSensitive(item);
+    output[key] = sensitiveKeyPattern.test(key) || contentKeyPattern.test(key) ? "[redacted]" : redactSensitive(item);
   }
   return output;
 }

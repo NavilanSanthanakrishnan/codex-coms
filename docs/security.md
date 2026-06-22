@@ -61,7 +61,7 @@ Events include:
 - Wake event queueing and wake command failures.
 - Runtime errors.
 
-Audit details are redacted for sensitive key names such as token, secret, password, authorization, cookie, and key.
+Audit details are redacted for sensitive key names such as token, secret, password, authorization, cookie, and key. Content-bearing field names such as payload, contentBase64, dataBase64, body, text, raw, bytes, and buffer are also redacted so audit events do not accidentally store message text or file bytes.
 
 ## Important Limits
 
