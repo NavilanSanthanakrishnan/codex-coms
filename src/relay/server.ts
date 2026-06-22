@@ -1,7 +1,7 @@
 import http from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import { makeProtocolMessage, parseProtocolMessage } from "../protocol/schema.js";
-import type { ProtocolMessage } from "../protocol/types.js";
+import type { ProtocolMessage, RoomPeer } from "../protocol/types.js";
 
 export interface RelayServerOptions {
   host: string;
@@ -15,6 +15,8 @@ interface RelayConnection {
   agentId: string;
   room: string;
   kind: string;
+  connectedAt: string;
+  lastSeenAt: string;
 }
 
 function formatCloseReason(reason: Buffer<ArrayBufferLike>): string {
@@ -92,11 +94,14 @@ export class RelayServer {
   }
 
   private register(ws: WebSocket, hello: ProtocolMessage): void {
+    const connectedAt = new Date().toISOString();
     const connection: RelayConnection = {
       ws,
       agentId: hello.from,
       room: hello.room,
-      kind: String(hello.payload.kind ?? "unknown")
+      kind: String(hello.payload.kind ?? "unknown"),
+      connectedAt,
+      lastSeenAt: connectedAt
     };
     let room = this.rooms.get(connection.room);
     if (!room) {
@@ -162,6 +167,7 @@ export class RelayServer {
       this.sendError(ws, "forbidden", "message room/from does not match connection", message.id, connection.room, connection.agentId);
       return;
     }
+    connection.lastSeenAt = new Date().toISOString();
     if (message.type === "room.peers.request") {
       this.send(ws, makeProtocolMessage({
         type: "room.peers.response",
@@ -195,16 +201,21 @@ export class RelayServer {
     }
   }
 
-  private listRoomPeers(roomName: string): Array<{ agentId: string; sockets: number; kinds: string[] }> {
+  private listRoomPeers(roomName: string): RoomPeer[] {
     const room = this.rooms.get(roomName);
     if (!room) {
       return [];
     }
     return [...room.entries()].map(([agentId, sockets]) => {
+      const socketList = [...sockets];
+      const connectedAt = socketList.map((connection) => connection.connectedAt).sort()[0] ?? new Date(0).toISOString();
+      const lastSeenAt = socketList.map((connection) => connection.lastSeenAt).sort().at(-1) ?? connectedAt;
       return {
         agentId,
         sockets: sockets.size,
-        kinds: [...new Set([...sockets].map((connection) => connection.kind))]
+        kinds: [...new Set(socketList.map((connection) => connection.kind))].sort(),
+        connectedAt,
+        lastSeenAt
       };
     }).sort((left, right) => left.agentId.localeCompare(right.agentId));
   }

@@ -18,7 +18,7 @@ import {
   parseProtocolMessage,
   validatePayload
 } from "../protocol/schema.js";
-import type { ProtocolMessage, ProtocolType } from "../protocol/types.js";
+import type { ProtocolMessage, ProtocolType, RoomPeer } from "../protocol/types.js";
 import { appendInboxEntry, appendOutboxEntry } from "./inbox.js";
 import type { InboxEntry } from "./inbox.js";
 import { FileTransferReceiver, prepareFileTransfer } from "../transfer/fileTransfer.js";
@@ -235,7 +235,7 @@ export async function sendAgentMessage(config: CodexComsConfig, to: string, text
   return message;
 }
 
-export async function requestRoomPeers(config: CodexComsConfig): Promise<Array<{ agentId: string; sockets: number; kinds: string[] }>> {
+export async function requestRoomPeers(config: CodexComsConfig): Promise<RoomPeer[]> {
   const message = makeProtocolMessage({
     type: "room.peers.request",
     room: config.room ?? "default",

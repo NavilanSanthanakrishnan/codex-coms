@@ -56,4 +56,6 @@ export interface RoomPeer {
   agentId: string;
   sockets: number;
   kinds: string[];
+  connectedAt?: string;
+  lastSeenAt?: string;
 }

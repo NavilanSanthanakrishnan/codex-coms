@@ -109,7 +109,7 @@ The demo starts a relay, creates Alice and Bob temp workspaces, sends a message,
 - `codex-coms read-remote --from <agentId> --grant <grantId> --path <relativePath>` reads a granted remote file.
 - `codex-coms send-file --to <agentId> --path <path>` transfers a file safely.
 - `codex-coms status` shows local state, including sidecar timing, next pending wake-command work, and wake-handler lock state when available.
-- `codex-coms status --peers` asks the relay which agents are connected in the room.
+- `codex-coms status --peers` asks the relay which agents are connected in the room, including relay-observed peer `connectedAt` and `lastSeenAt` timestamps when the relay provides them.
 - `codex-coms wake notify` enables a local macOS notification for inbound inbox events and tries one local catch-up command for existing pending wake work.
 - `codex-coms wake queue` shows pending local wake events.
 - `codex-coms wake drain --json` claims pending wake events for a local thread, automation, or `codex exec` wrapper. Pass `--event <wakeOrInboxId>` to claim the exact event that woke a local adapter.
@@ -205,7 +205,7 @@ The relay does not queue offline inboxes. If `send` says the target is offline, 
   - `sendProtocolMessage`: sends one short-lived command message.
   - `requestProtocolResponse`: sends one command and waits for a correlated response.
   - `sendAgentMessage`: sends an `agent.message`, waits for peer acknowledgement, and writes local outbox/audit entries.
-  - `requestRoomPeers`: asks the relay for connected room members.
+  - `requestRoomPeers`: asks the relay for connected room members and relay-observed freshness timestamps when available.
   - `sendFileToPeer`: sends a file offer, chunks, and completion frame.
   - `PeerSidecar.start`: connects the long-running sidecar, tries one local wake-command catch-up, and starts handling inbound messages.
   - `PeerSidecar.waitForClose`: waits until the sidecar socket closes.

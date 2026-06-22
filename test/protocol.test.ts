@@ -94,12 +94,34 @@ describe("protocol schema", () => {
           {
             agentId: "alice",
             sockets: 1,
-            kinds: ["sidecar"]
+            kinds: ["sidecar"],
+            connectedAt: "2026-06-22T18:15:00.000Z",
+            lastSeenAt: "2026-06-22T18:15:01.000Z"
           }
         ]
       }
     });
     expect(parseProtocolMessage(request).type).toBe("room.peers.request");
+    expect(parseProtocolMessage(response).type).toBe("room.peers.response");
+  });
+
+  it("accepts room peer status messages from older relays without freshness timestamps", () => {
+    const response = makeProtocolMessage({
+      type: "room.peers.response",
+      room: "pair",
+      from: "relay",
+      to: "alice",
+      payload: {
+        requestId: "request-1",
+        peers: [
+          {
+            agentId: "alice",
+            sockets: 1,
+            kinds: ["sidecar"]
+          }
+        ]
+      }
+    });
     expect(parseProtocolMessage(response).type).toBe("room.peers.response");
   });
 });
