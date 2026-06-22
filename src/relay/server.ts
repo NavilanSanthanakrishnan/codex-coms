@@ -17,6 +17,14 @@ interface RelayConnection {
   kind: string;
 }
 
+function formatCloseReason(reason: Buffer<ArrayBufferLike>): string {
+  const value = reason.toString("utf8").replace(/[\r\n\t]+/g, " ").trim();
+  if (!value) {
+    return "(none)";
+  }
+  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+}
+
 export class RelayServer {
   private httpServer?: http.Server;
   private wsServer?: WebSocketServer;
@@ -80,7 +88,7 @@ export class RelayServer {
         ws.close();
       }
     });
-    ws.on("close", () => this.unregister(ws));
+    ws.on("close", (code, reason) => this.unregister(ws, code, reason));
   }
 
   private register(ws: WebSocket, hello: ProtocolMessage): void {
@@ -112,10 +120,10 @@ export class RelayServer {
         agentCount: room.size
       }
     }));
-    this.options.logger?.log(`relay connected agent=${connection.agentId} room=${connection.room}`);
+    this.options.logger?.log(`relay connected agent=${connection.agentId} room=${connection.room} kind=${connection.kind}`);
   }
 
-  private unregister(ws: WebSocket): void {
+  private unregister(ws: WebSocket, code = 1005, reason: Buffer<ArrayBufferLike> = Buffer.alloc(0)): void {
     const connection = this.connections.get(ws);
     if (!connection) {
       return;
@@ -130,7 +138,7 @@ export class RelayServer {
     if (room && room.size === 0) {
       this.rooms.delete(connection.room);
     }
-    this.options.logger?.log(`relay disconnected agent=${connection.agentId} room=${connection.room}`);
+    this.options.logger?.log(`relay disconnected agent=${connection.agentId} room=${connection.room} kind=${connection.kind} code=${code} reason=${formatCloseReason(reason)}`);
   }
 
   private handleMessage(ws: WebSocket, raw: string): void {
