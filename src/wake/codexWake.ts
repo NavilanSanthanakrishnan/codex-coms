@@ -56,6 +56,7 @@ export interface WakeWaitOptions {
 
 const MAX_DRAINED_IDS = 5000;
 const DRAIN_LOCK_STALE_MS = 30_000;
+const DRAIN_LOCK_TIMEOUT_MESSAGE = "timed out waiting for wake drain lock";
 
 function wakeRoot(dataDir: string): string {
   return path.join(dataDir, "wake");
@@ -135,10 +136,14 @@ async function acquireDrainLock(dataDir: string, timeoutMs = 5000): Promise<() =
           throw statError;
         }
       }
-      await sleep(50);
+      await sleep(Math.min(50, Math.max(1, timeoutMs - (Date.now() - started))));
     }
   }
-  throw new Error("timed out waiting for wake drain lock");
+  throw new Error(DRAIN_LOCK_TIMEOUT_MESSAGE);
+}
+
+function isDrainLockTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === DRAIN_LOCK_TIMEOUT_MESSAGE;
 }
 
 export function createWakeEvent(input: {
@@ -221,12 +226,15 @@ export async function markWakeEventsDrained(dataDir: string, ids: string[]): Pro
   return ids.length;
 }
 
-export async function drainPendingWakeEvents(dataDir: string, limit: number): Promise<WakeEvent[]> {
+export async function drainPendingWakeEvents(dataDir: string, limit: number, lockTimeoutMs = 5000): Promise<WakeEvent[]> {
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error("limit must be a positive integer");
   }
+  if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 0) {
+    throw new Error("lockTimeoutMs must be a non-negative integer");
+  }
   await mkdir(dataDir, { recursive: true });
-  const release = await acquireDrainLock(dataDir);
+  const release = await acquireDrainLock(dataDir, lockTimeoutMs);
   try {
     const events = (await readPendingWakeEvents(dataDir)).slice(0, limit);
     await markWakeEventsDrained(dataDir, events.map((event) => event.id));
@@ -249,13 +257,39 @@ export async function waitForPendingWakeEvents(dataDir: string, options: WakeWai
   if (!Number.isInteger(pollMs) || pollMs < 1) {
     throw new Error("pollMs must be a positive integer");
   }
-  const existing = await drainPendingWakeEvents(dataDir, limit);
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
+  const drainForWait = async (): Promise<{ events: WakeEvent[]; timedOut: boolean }> => {
+    const remainingMs = deadline === undefined ? 5000 : Math.max(0, deadline - Date.now());
+    if (deadline !== undefined && remainingMs === 0) {
+      return { events: [], timedOut: true };
+    }
+    try {
+      return {
+        events: await drainPendingWakeEvents(dataDir, limit, remainingMs),
+        timedOut: false
+      };
+    } catch (error) {
+      if (isDrainLockTimeout(error)) {
+        return {
+          events: [],
+          timedOut: deadline !== undefined && Date.now() >= deadline
+        };
+      }
+      throw error;
+    }
+  };
+  const initial = await drainForWait();
+  const existing = initial.events;
   if (existing.length > 0) {
     return existing;
+  }
+  if (initial.timedOut) {
+    return [];
   }
   await mkdir(dataDir, { recursive: true });
   return new Promise((resolve, reject) => {
     let settled = false;
+    let checking = false;
     let watcher: FSWatcher | undefined;
     let timeout: NodeJS.Timeout | undefined;
     const interval = setInterval(() => {
@@ -286,12 +320,19 @@ export async function waitForPendingWakeEvents(dataDir: string, options: WakeWai
       reject(error);
     }
     async function check(): Promise<void> {
-      if (settled) {
+      if (settled || checking) {
         return;
       }
-      const events = await drainPendingWakeEvents(dataDir, limit);
-      if (events.length > 0) {
-        finish(events);
+      checking = true;
+      try {
+        const result = await drainForWait();
+        if (result.events.length > 0) {
+          finish(result.events);
+        } else if (result.timedOut) {
+          finish([]);
+        }
+      } finally {
+        checking = false;
       }
     }
     try {
@@ -306,7 +347,8 @@ export async function waitForPendingWakeEvents(dataDir: string, options: WakeWai
       return;
     }
     if (timeoutMs > 0) {
-      timeout = setTimeout(() => finish([]), timeoutMs);
+      const timeoutDelayMs = deadline === undefined ? timeoutMs : Math.max(0, deadline - Date.now());
+      timeout = setTimeout(() => finish([]), timeoutDelayMs);
       timeout.unref?.();
     }
     check().catch(fail);

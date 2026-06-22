@@ -169,4 +169,24 @@ describe("wake events", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("honors wake wait timeout while the drain lock is held", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-wait-lock-"));
+    try {
+      const dataDir = path.join(root, ".codex-coms");
+      await mkdir(path.join(dataDir, "wake-drain.lock"), { recursive: true });
+
+      const started = Date.now();
+      const events = await waitForPendingWakeEvents(dataDir, {
+        limit: 1,
+        timeoutMs: 50,
+        pollMs: 10
+      });
+
+      expect(events).toEqual([]);
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
