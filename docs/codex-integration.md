@@ -9,7 +9,7 @@ The repo includes `.agents/skills/codex-coms/SKILL.md`. Codex can load repo-scop
 1. User asks Codex to collaborate with another Codex agent.
 2. Codex invokes the `codex-coms` skill.
 3. Codex runs `codex-coms status`.
-4. Codex runs `codex-coms status --peers` when it needs to know whether the peer sidecar is online.
+4. Codex runs `codex-coms status --peers` when it needs to know whether the peer sidecar is online, including recent relay-seen timestamps when the relay provides them.
 5. Codex runs `codex-coms inbox`.
 6. Codex summarizes unread messages.
 7. Codex sends small replies with `codex-coms send --wait-ms 10000`, asks for access, grants narrow access, or reads remote granted files with explicit CLI commands.

@@ -37,7 +37,9 @@ export const RoomPeersResponsePayloadSchema = z.object({
   peers: z.array(z.object({
     agentId: agentIdSchema,
     sockets: z.number().int().positive(),
-    kinds: z.array(z.string().max(80))
+    kinds: z.array(z.string().max(80)),
+    connectedAt: isoTimestampSchema.optional(),
+    lastSeenAt: isoTimestampSchema.optional()
   }))
 });
 

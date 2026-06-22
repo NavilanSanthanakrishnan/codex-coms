@@ -26,7 +26,7 @@ Every message has this shape:
 - `agent.message`: human-readable peer message. Payload includes `text`.
 - `agent.message.ack`: peer receipt notice. Payload includes `messageId`.
 - `room.peers.request`: ask the relay for connected room members. Payload is empty.
-- `room.peers.response`: connected room members. Payload includes `requestId` and `peers`.
+- `room.peers.response`: connected room members. Payload includes `requestId` and `peers`; each peer includes `agentId`, `sockets`, and `kinds`, with optional `connectedAt` and `lastSeenAt` timestamps from relays that provide freshness metadata.
 - `workspace.grant.request`: request read access. Payload includes `path` and `reason`.
 - `workspace.grant.created`: notify a peer that a grant exists. Payload includes `grantId`, `name`, `path`, `expiresAt`, `maxReadBytes`, and `maxListEntries`.
 - `workspace.grant.revoked`: notify a peer that a grant was revoked. Payload includes `grantId`.

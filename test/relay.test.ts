@@ -134,10 +134,19 @@ describe("relay server", () => {
       });
       const response = alice.waitFor((item) => item.type === "room.peers.response" && item.payload.requestId === request.id, 2000);
       alice.send(request);
-      expect((await response).payload.peers).toEqual(expect.arrayContaining([
+      const peers = (await response).payload.peers as Array<Record<string, unknown>>;
+      expect(peers).toEqual(expect.arrayContaining([
         expect.objectContaining({ agentId: "alice" }),
         expect.objectContaining({ agentId: "bob" })
       ]));
+      for (const peer of peers) {
+        expect(peer.connectedAt).toEqual(expect.any(String));
+        expect(peer.lastSeenAt).toEqual(expect.any(String));
+        expect(Date.parse(String(peer.connectedAt))).not.toBeNaN();
+        expect(Date.parse(String(peer.lastSeenAt))).not.toBeNaN();
+      }
+      const alicePeer = peers.find((peer) => peer.agentId === "alice");
+      expect(Date.parse(String(alicePeer?.lastSeenAt))).toBeGreaterThanOrEqual(Date.parse(String(alicePeer?.connectedAt)));
     } finally {
       alice.close();
       bob.close();

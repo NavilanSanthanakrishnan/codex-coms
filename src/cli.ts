@@ -23,6 +23,7 @@ import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
 import { drainPendingWakeEvents, drainWakeEventById, drainWakeEventsForInboxEntries, formatWakeEvents, readPendingWakeEvents, readWakeCommandStatus, readWakeEvents, triggerPendingWakeCommand, triggerPendingWakeCommands, waitForPendingWakeEvents } from "./wake/codexWake.js";
+import type { RoomPeer } from "./protocol/types.js";
 import path from "node:path";
 
 const program = new Command();
@@ -574,7 +575,7 @@ program.command("status")
     }
     const failedOutbox = outbox.filter((entry) => !entry.delivered);
     const lastFailedSend = failedOutbox.at(-1);
-    let peers: Array<{ agentId: string; sockets: number; kinds: string[] }> | undefined;
+    let peers: RoomPeer[] | undefined;
     if (options.peers) {
       try {
         peers = await requestRoomPeers(config);
@@ -659,7 +660,8 @@ program.command("status")
       if (status.peers) {
         console.log("peers:");
         for (const peer of status.peers) {
-          console.log(`- ${peer.agentId} sockets=${peer.sockets} kinds=${peer.kinds.join(",")}`);
+          const freshness = peer.connectedAt && peer.lastSeenAt ? ` connectedAt=${peer.connectedAt} lastSeenAt=${peer.lastSeenAt}` : "";
+          console.log(`- ${peer.agentId} sockets=${peer.sockets} kinds=${peer.kinds.join(",")}${freshness}`);
         }
       }
       for (const warning of status.warnings) {
