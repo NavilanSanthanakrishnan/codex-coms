@@ -704,11 +704,13 @@ wake.command("wait")
 wake.command("trigger")
   .description("start the configured wake command for the next pending unattempted wake event")
   .option("--json", "print JSON")
+  .option("--event <id>", "target a pending wake event by wake event id or inbox entry id")
   .option("--retry-attempted", "retry the next pending event even if it already attempted a wake command")
   .action(async (options) => {
     const config = await loadCliConfig(options);
     const result = await triggerPendingWakeCommand(config.dataDir, config.agentId, config.wake, {
-      retryAttempted: Boolean(options.retryAttempted)
+      retryAttempted: Boolean(options.retryAttempted),
+      eventId: options.event
     });
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -718,6 +720,8 @@ wake.command("trigger")
       console.log("No wake command is configured. Run codex-coms wake notify or codex-coms wake command first.");
     } else if (result.reason === "no_pending") {
       console.log("No pending wake events need a wake command.");
+    } else if (result.reason === "not_found") {
+      console.log(`No pending wake event matched ${result.target}.`);
     } else if (result.reason === "already_attempted") {
       console.log("All pending wake events already attempted a wake command. Pass --retry-attempted to retry one locally.");
     } else if (result.reason === "started") {

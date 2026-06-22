@@ -55,13 +55,14 @@ export interface WakeDispatchResult {
   commandStarted: boolean;
 }
 
-export type WakeTriggerReason = "not_configured" | "no_pending" | "already_attempted" | "started" | "not_started";
+export type WakeTriggerReason = "not_configured" | "no_pending" | "not_found" | "already_attempted" | "started" | "not_started";
 
 export interface WakeTriggerResult {
   event?: WakeEvent;
   commandStarted: boolean;
   reason: WakeTriggerReason;
   retriedAttempted?: boolean;
+  target?: string;
 }
 
 export interface WakeCommandStatus {
@@ -83,6 +84,7 @@ export interface WakeWaitOptions {
 
 export interface WakeTriggerOptions {
   retryAttempted?: boolean;
+  eventId?: string;
 }
 
 const MAX_DRAINED_IDS = 5000;
@@ -694,18 +696,24 @@ export async function triggerPendingWakeCommand(dataDir: string, localAgentId: s
     readPendingWakeEvents(dataDir),
     readWakeCommandState(dataDir)
   ]);
-  if (events.length === 0) {
+  const candidates = options.eventId
+    ? events.filter((item) => item.id === options.eventId || item.inboxEntryId === options.eventId)
+    : events;
+  if (options.eventId && candidates.length === 0) {
+    return { commandStarted: false, reason: "not_found", target: options.eventId };
+  }
+  if (candidates.length === 0) {
     return { commandStarted: false, reason: "no_pending" };
   }
   const attempted = new Set(commandState.attemptedIds);
   let retriedAttempted = false;
-  let event = events.find((item) => !attempted.has(item.id));
+  let event = candidates.find((item) => !attempted.has(item.id));
   if (!event && options.retryAttempted) {
-    event = events.find((item) => attempted.has(item.id));
+    event = candidates.find((item) => attempted.has(item.id));
     retriedAttempted = Boolean(event);
   }
   if (!event) {
-    return { commandStarted: false, reason: "already_attempted" };
+    return { commandStarted: false, reason: "already_attempted", target: options.eventId };
   }
   const commandStarted = await maybeWakeCodex(dataDir, localAgentId, config, event, {
     eventPath: event.eventPath ?? eventPathFor(dataDir, event.id),
@@ -715,7 +723,8 @@ export async function triggerPendingWakeCommand(dataDir: string, localAgentId: s
     event,
     commandStarted,
     reason: commandStarted ? "started" : "not_started",
-    retriedAttempted
+    retriedAttempted,
+    target: options.eventId
   };
 }
 
