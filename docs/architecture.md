@@ -89,6 +89,7 @@ The local user can wire those events into their own Codex runtime:
 
 - `codex-coms wake queue` shows events that have not been claimed.
 - `codex-coms wake drain --json` claims pending events for an active thread, automation, or `codex exec` wrapper.
+- `codex-coms wake wait --json` blocks a local adapter until wake events are available, then claims them without repeatedly checking raw inbox state.
 - `codex-coms wake command /absolute/path [args...]` starts a trusted local adapter when events arrive. The adapter receives local file paths and environment metadata, then decides whether to notify, steer a current task, or wake an inactive thread.
 
 Existing Codex thread interruption remains a local Codex-app/automation concern, not a peer-controlled protocol feature.

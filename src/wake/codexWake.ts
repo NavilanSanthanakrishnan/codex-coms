@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendAudit } from "../audit/auditLog.js";
@@ -47,8 +48,15 @@ export interface WakeDispatchResult {
   commandStarted: boolean;
 }
 
+export interface WakeWaitOptions {
+  limit?: number;
+  timeoutMs?: number;
+  pollMs?: number;
+}
+
 const MAX_DRAINED_IDS = 5000;
 const DRAIN_LOCK_STALE_MS = 30_000;
+const DRAIN_LOCK_TIMEOUT_MESSAGE = "timed out waiting for wake drain lock";
 
 function wakeRoot(dataDir: string): string {
   return path.join(dataDir, "wake");
@@ -128,10 +136,14 @@ async function acquireDrainLock(dataDir: string, timeoutMs = 5000): Promise<() =
           throw statError;
         }
       }
-      await sleep(50);
+      await sleep(Math.min(50, Math.max(1, timeoutMs - (Date.now() - started))));
     }
   }
-  throw new Error("timed out waiting for wake drain lock");
+  throw new Error(DRAIN_LOCK_TIMEOUT_MESSAGE);
+}
+
+function isDrainLockTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === DRAIN_LOCK_TIMEOUT_MESSAGE;
 }
 
 export function createWakeEvent(input: {
@@ -214,11 +226,15 @@ export async function markWakeEventsDrained(dataDir: string, ids: string[]): Pro
   return ids.length;
 }
 
-export async function drainPendingWakeEvents(dataDir: string, limit: number): Promise<WakeEvent[]> {
+export async function drainPendingWakeEvents(dataDir: string, limit: number, lockTimeoutMs = 5000): Promise<WakeEvent[]> {
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error("limit must be a positive integer");
   }
-  const release = await acquireDrainLock(dataDir);
+  if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 0) {
+    throw new Error("lockTimeoutMs must be a non-negative integer");
+  }
+  await mkdir(dataDir, { recursive: true });
+  const release = await acquireDrainLock(dataDir, lockTimeoutMs);
   try {
     const events = (await readPendingWakeEvents(dataDir)).slice(0, limit);
     await markWakeEventsDrained(dataDir, events.map((event) => event.id));
@@ -226,6 +242,117 @@ export async function drainPendingWakeEvents(dataDir: string, limit: number): Pr
   } finally {
     await release();
   }
+}
+
+export async function waitForPendingWakeEvents(dataDir: string, options: WakeWaitOptions = {}): Promise<WakeEvent[]> {
+  const limit = options.limit ?? 1;
+  const timeoutMs = options.timeoutMs ?? 0;
+  const pollMs = options.pollMs ?? 250;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error("limit must be a positive integer");
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0) {
+    throw new Error("timeoutMs must be a non-negative integer");
+  }
+  if (!Number.isInteger(pollMs) || pollMs < 1) {
+    throw new Error("pollMs must be a positive integer");
+  }
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
+  const drainForWait = async (): Promise<{ events: WakeEvent[]; timedOut: boolean }> => {
+    const remainingMs = deadline === undefined ? 5000 : Math.max(0, deadline - Date.now());
+    if (deadline !== undefined && remainingMs === 0) {
+      return { events: [], timedOut: true };
+    }
+    try {
+      return {
+        events: await drainPendingWakeEvents(dataDir, limit, remainingMs),
+        timedOut: false
+      };
+    } catch (error) {
+      if (isDrainLockTimeout(error)) {
+        return {
+          events: [],
+          timedOut: deadline !== undefined && Date.now() >= deadline
+        };
+      }
+      throw error;
+    }
+  };
+  const initial = await drainForWait();
+  const existing = initial.events;
+  if (existing.length > 0) {
+    return existing;
+  }
+  if (initial.timedOut) {
+    return [];
+  }
+  await mkdir(dataDir, { recursive: true });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let checking = false;
+    let watcher: FSWatcher | undefined;
+    let timeout: NodeJS.Timeout | undefined;
+    const interval = setInterval(() => {
+      check().catch(fail);
+    }, pollMs);
+    interval.unref?.();
+    const cleanup = () => {
+      watcher?.close();
+      clearInterval(interval);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
+    const finish = (events: WakeEvent[]) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(events);
+    };
+    function fail(error: unknown): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    }
+    async function check(): Promise<void> {
+      if (settled || checking) {
+        return;
+      }
+      checking = true;
+      try {
+        const result = await drainForWait();
+        if (result.events.length > 0) {
+          finish(result.events);
+        } else if (result.timedOut) {
+          finish([]);
+        }
+      } finally {
+        checking = false;
+      }
+    }
+    try {
+      watcher = watch(dataDir, (_eventType, filename) => {
+        if (!filename || String(filename) === "wake-events.jsonl") {
+          check().catch(fail);
+        }
+      });
+      watcher.on("error", fail);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (timeoutMs > 0) {
+      const timeoutDelayMs = deadline === undefined ? timeoutMs : Math.max(0, deadline - Date.now());
+      timeout = setTimeout(() => finish([]), timeoutDelayMs);
+      timeout.unref?.();
+    }
+    check().catch(fail);
+  });
 }
 
 export function formatWakeEvents(events: WakeEvent[]): string {

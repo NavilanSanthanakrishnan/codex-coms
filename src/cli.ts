@@ -22,7 +22,7 @@ import { clearSidecarPid, ensureNoDuplicateSidecar, isProcessRunning, readSideca
 import { makeProtocolMessage } from "./protocol/schema.js";
 import { RelayServer } from "./relay/server.js";
 import { createGrant, isGrantActive, loadGrants, revokeGrant } from "./workspace/grants.js";
-import { drainPendingWakeEvents, formatWakeEvents, readPendingWakeEvents, readWakeEvents } from "./wake/codexWake.js";
+import { drainPendingWakeEvents, formatWakeEvents, readPendingWakeEvents, readWakeEvents, waitForPendingWakeEvents } from "./wake/codexWake.js";
 import path from "node:path";
 
 const program = new Command();
@@ -52,6 +52,14 @@ function positiveIntegerOption(value: unknown, name: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function nonNegativeIntegerOption(value: unknown, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
   }
   return parsed;
 }
@@ -619,6 +627,29 @@ wake.command("drain")
     const events = await drainPendingWakeEvents(config.dataDir, limit);
     if (options.json) {
       console.log(JSON.stringify(events, null, 2));
+    } else {
+      console.log(formatWakeEvents(events));
+      console.log(`Drained ${events.length} wake event(s).`);
+    }
+  });
+
+wake.command("wait")
+  .description("wait until local wake events are available, then claim them")
+  .option("--json", "print JSON")
+  .option("--limit <count>", "maximum events to drain", "1")
+  .option("--timeout-ms <ms>", "maximum time to wait; 0 waits forever", "0")
+  .option("--poll-ms <ms>", "fallback wake queue check interval", "250")
+  .action(async (options) => {
+    const config = await loadCliConfig(options);
+    const events = await waitForPendingWakeEvents(config.dataDir, {
+      limit: positiveIntegerOption(options.limit, "--limit"),
+      timeoutMs: nonNegativeIntegerOption(options.timeoutMs, "--timeout-ms"),
+      pollMs: positiveIntegerOption(options.pollMs, "--poll-ms")
+    });
+    if (options.json) {
+      console.log(JSON.stringify(events, null, 2));
+    } else if (events.length === 0) {
+      console.log("No wake events arrived before timeout.");
     } else {
       console.log(formatWakeEvents(events));
       console.log(`Drained ${events.length} wake event(s).`);
