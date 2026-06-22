@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { initWorkspace } from "../src/config.js";
+import { initWorkspace, updateConfig } from "../src/config.js";
 import { PeerSidecar, sendAgentMessage } from "../src/peer/client.js";
 import { appendInboxEntry, readInboxEntries } from "../src/peer/inbox.js";
 import { RelayServer } from "../src/relay/server.js";
@@ -340,6 +340,142 @@ describe("wake events", () => {
         "wake_message-retry-1",
         "wake_message-retry-1"
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("triggers a targeted pending wake event by wake id or inbox id", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-coms-wake-trigger-target-"));
+    try {
+      const workspace = path.join(root, "workspace");
+      await mkdir(workspace, { recursive: true });
+      const config = await initWorkspace({
+        agentId: "bob",
+        workspace,
+        relay: "ws://127.0.0.1:8787",
+        room: "pair",
+        token: "test-token"
+      });
+      const marker = path.join(root, "target-marker.txt");
+      const script = path.join(root, "wake-target-script.mjs");
+      await writeFile(script, [
+        "import { appendFile } from 'node:fs/promises';",
+        "const marker = process.argv[2];",
+        "await appendFile(marker, `${process.env.CODEX_COMS_WAKE_EVENT_ID}\\n`);"
+      ].join("\n"), "utf8");
+      await updateConfig(config, {
+        wake: {
+          enabled: true,
+          command: [process.execPath, script, marker],
+          allowConcurrent: true
+        }
+      });
+
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-target-1",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "first targeted wake event",
+          read: false,
+          payload: { text: "first targeted wake event" }
+        }
+      });
+      await dispatchWakeEvent({
+        dataDir: config.dataDir,
+        workspace,
+        localAgentId: "bob",
+        entry: {
+          id: "message-target-2",
+          timestamp: new Date().toISOString(),
+          from: "alice",
+          type: "agent.message",
+          summary: "second targeted wake event",
+          read: false,
+          payload: { text: "second targeted wake event" }
+        }
+      });
+
+      const { stdout: secondJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--event",
+        "message-target-2",
+        "--json"
+      ], { cwd: process.cwd() });
+      const second = JSON.parse(secondJson) as Record<string, unknown>;
+      expect(second.reason).toBe("started");
+      expect((second.event as Record<string, unknown>).id).toBe("wake_message-target-2");
+      await waitFor(async () => {
+        const content = await readFile(marker, "utf8").catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+          }
+          throw error;
+        });
+        return content?.split("\n").filter(Boolean).length === 1 ? content : undefined;
+      });
+
+      const { stdout: firstJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--event",
+        "wake_message-target-1",
+        "--json"
+      ], { cwd: process.cwd() });
+      const first = JSON.parse(firstJson) as Record<string, unknown>;
+      expect(first.reason).toBe("started");
+      expect((first.event as Record<string, unknown>).inboxEntryId).toBe("message-target-1");
+
+      const finalMarker = await waitFor(async () => {
+        const content = await readFile(marker, "utf8");
+        return content.split("\n").filter(Boolean).length === 2 ? content : undefined;
+      });
+      expect(finalMarker.split("\n").filter(Boolean)).toEqual([
+        "wake_message-target-2",
+        "wake_message-target-1"
+      ]);
+
+      const { stdout: attemptedJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--event",
+        "message-target-2",
+        "--json"
+      ], { cwd: process.cwd() });
+      const attempted = JSON.parse(attemptedJson) as Record<string, unknown>;
+      expect(attempted.reason).toBe("already_attempted");
+      expect(attempted.commandStarted).toBe(false);
+      expect(attempted.target).toBe("message-target-2");
+
+      const { stdout: missingJson } = await execFileAsync(process.execPath, [
+        ...cliArgs,
+        "--workspace",
+        workspace,
+        "wake",
+        "trigger",
+        "--event",
+        "missing-event",
+        "--json"
+      ], { cwd: process.cwd() });
+      const missing = JSON.parse(missingJson) as Record<string, unknown>;
+      expect(missing.reason).toBe("not_found");
+      expect(missing.commandStarted).toBe(false);
+      expect(missing.target).toBe("missing-event");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
